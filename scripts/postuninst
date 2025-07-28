@@ -1,0 +1,41 @@
+#!/bin/bash
+
+# Post-uninstall script for NetBird DSM package
+PACKAGE_NAME="NetBird"
+NETBIRD_USER="netbird"
+
+echo "Cleaning up NetBird installation..."
+
+# Remove symlink
+if [ -L "/usr/local/bin/netbird" ]; then
+    rm -f "/usr/local/bin/netbird"
+fi
+
+# Remove log rotation configuration
+if [ -f "/etc/logrotate.d/netbird" ]; then
+    rm -f "/etc/logrotate.d/netbird"
+fi
+
+# Optional: Remove user (commented out to preserve user data)
+# Uncomment the following lines if you want to completely remove the user
+# if id "$NETBIRD_USER" >/dev/null 2>&1; then
+#     echo "Removing user: $NETBIRD_USER"
+#     deluser "$NETBIRD_USER" 2>/dev/null || true
+# fi
+
+# Clean up any remaining network interfaces created by NetBird
+ip link show | grep -E "wt|nb" | awk '{print $2}' | sed 's/:$//' | while read interface; do
+    if [[ $interface =~ ^(wt|nb) ]]; then
+        echo "Removing NetBird interface: $interface"
+        ip link delete "$interface" 2>/dev/null || true
+    fi
+done
+
+echo "NetBird cleanup completed"
+echo ""
+echo "Note: Configuration files and logs have been preserved in case you reinstall."
+echo "To completely remove all NetBird data, manually delete:"
+echo "  - User data directory (if user was not removed)"
+echo "  - Any remaining configuration files"
+
+exit 0

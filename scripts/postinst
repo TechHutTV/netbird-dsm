@@ -1,0 +1,79 @@
+#!/bin/bash
+
+# Post-installation script for NetBird DSM package
+PACKAGE_NAME="NetBird"
+PACKAGE_DIR="/var/packages/${PACKAGE_NAME}"
+TARGET_DIR="${PACKAGE_DIR}/target"
+CONFIG_DIR="${PACKAGE_DIR}/etc"
+VAR_DIR="${PACKAGE_DIR}/var"
+NETBIRD_USER="netbird"
+
+echo "Configuring NetBird package..."
+
+# Create netbird user if it doesn't exist
+if ! id "$NETBIRD_USER" >/dev/null 2>&1; then
+    echo "Creating user: $NETBIRD_USER"
+    adduser --system --no-create-home --shell /bin/false --group "$NETBIRD_USER"
+fi
+
+# Create necessary directories
+mkdir -p "$CONFIG_DIR"
+mkdir -p "$VAR_DIR"
+
+# Set proper permissions
+chown -R "$NETBIRD_USER:$NETBIRD_USER" "$CONFIG_DIR" "$VAR_DIR"
+chmod 755 "$CONFIG_DIR" "$VAR_DIR"
+
+# Make netbird binary executable
+if [ -f "$TARGET_DIR/netbird" ]; then
+    chmod +x "$TARGET_DIR/netbird"
+    chown root:root "$TARGET_DIR/netbird"
+else
+    echo "Warning: NetBird binary not found at $TARGET_DIR/netbird"
+fi
+
+# Create symlink for easier access (optional)
+if [ ! -L "/usr/local/bin/netbird" ]; then
+    ln -sf "$TARGET_DIR/netbird" "/usr/local/bin/netbird"
+fi
+
+# Set up TUN device permissions (required for VPN)
+if [ -c /dev/net/tun ]; then
+    chmod 666 /dev/net/tun
+else
+    echo "Warning: TUN device not found. VPN functionality may not work."
+fi
+
+# Enable IP forwarding (may be needed for some NetBird configurations)
+echo 'net.ipv4.ip_forward = 1' >> /etc/sysctl.conf
+sysctl -p >/dev/null 2>&1 || true
+
+# Create default configuration directory structure
+mkdir -p "$CONFIG_DIR/config"
+chown -R "$NETBIRD_USER:$NETBIRD_USER" "$CONFIG_DIR/config"
+
+# Create log rotation configuration
+cat > /etc/logrotate.d/netbird << EOF
+$VAR_DIR/netbird.log {
+    weekly
+    missingok
+    rotate 4
+    compress
+    delaycompress
+    notifempty
+    copytruncate
+    su $NETBIRD_USER $NETBIRD_USER
+}
+EOF
+
+echo "NetBird package installation completed successfully!"
+echo ""
+echo "Next steps:"
+echo "1. Start the NetBird service from DSM Package Center"
+echo "2. Configure NetBird by running: netbird login"
+echo "3. Check status with: netbird status"
+echo ""
+echo "Configuration directory: $CONFIG_DIR"
+echo "Log directory: $VAR_DIR"
+
+exit 0

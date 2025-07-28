@@ -1,0 +1,27 @@
+#!/bin/bash
+
+# Pre-uninstall script for NetBird DSM package
+PACKAGE_NAME="NetBird"
+PACKAGE_DIR="/var/packages/${PACKAGE_NAME}"
+NETBIRD_USER="netbird"
+
+echo "Preparing to uninstall NetBird..."
+
+# Stop NetBird service if running
+if [ -f "$PACKAGE_DIR/scripts/start-stop-status" ]; then
+    echo "Stopping NetBird service..."
+    "$PACKAGE_DIR/scripts/start-stop-status" stop
+fi
+
+# Disconnect from NetBird network
+if [ -f "$PACKAGE_DIR/target/netbird" ]; then
+    echo "Disconnecting from NetBird network..."
+    su - "$NETBIRD_USER" -c "$PACKAGE_DIR/target/netbird down" 2>/dev/null || true
+fi
+
+# Kill any remaining netbird processes
+pkill -f "netbird" 2>/dev/null || true
+
+echo "NetBird service stopped successfully"
+
+exit 0
