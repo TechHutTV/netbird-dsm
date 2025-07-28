@@ -36,16 +36,7 @@ NetBird-0.28.0-1.spk
    chmod +x netbird
    ```
 
-2. **Prepare Files**:
-   ```bash
-   # Create directory structure
-   mkdir -p scripts conf
-   
-   # Copy the provided files to their respective locations
-   # (Use the artifacts provided above)
-   ```
-
-3. **Build Package**:
+2. **Build Package**:
    ```bash
    chmod +x build.sh
    ./build.sh
