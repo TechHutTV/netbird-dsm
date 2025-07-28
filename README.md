@@ -31,7 +31,7 @@ NetBird-0.28.0-1.spk
 1. **Get NetBird Binary**:
    ```bash
    # Download for your architecture from GitHub releases
-   wget https://github.com/netbirdio/netbird/releases/download/v0.28.0/netbird_0.28.0_linux_amd64.tar.gz
+   wget https://github.com/netbirdio/netbird/releases/download/v0.51.2/netbird-ui-linux_0.51.2_linux_amd64.tar.gz
    tar -xzf netbird_0.28.0_linux_amd64.tar.gz
    chmod +x netbird
    ```
