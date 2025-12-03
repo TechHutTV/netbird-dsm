@@ -37,6 +37,27 @@
         ]
     },
     {
+        "step_title": "DNS Settings",
+        "items": [
+            {
+                "type": "multiselect",
+                "desc": "DNS Management Configuration - NetBird normally manages DNS resolution for its network peers. If you run Synology DNS Server, Directory Server, or Active Directory, this may cause conflicts.",
+                "subitems": [
+                    {
+                        "key": "pkgwizard_disable_dns",
+                        "desc": "Disable DNS Management (Recommended if you run Synology DNS services)",
+                        "defaultValue": false
+                    }
+                ]
+            },
+            {
+                "type": "textfield",
+                "desc": "When DNS Management is disabled, NetBird will NOT modify your system's DNS settings. This prevents conflicts with Synology DNS Server and other DNS-dependent services. Note: With DNS disabled, you won't be able to resolve NetBird peer names by hostname on this device (you can still connect using IP addresses).",
+                "subitems": []
+            }
+        ]
+    },
+    {
         "step_title": "Important Information",
         "items": [
             {

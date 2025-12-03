@@ -6,6 +6,8 @@
 # This script runs before the package is installed
 # It should only check conditions and not modify the system
 
+LOG_FILE="${SYNOPKG_TEMP_LOGFILE:-/dev/null}"
+
 # Check if we're on a supported architecture
 ARCH=$(uname -m)
 case "${ARCH}" in
@@ -19,14 +21,75 @@ case "${ARCH}" in
         # Supported
         ;;
     *)
-        echo "Unsupported architecture: ${ARCH}" >> "${SYNOPKG_TEMP_LOGFILE}"
+        echo "Unsupported architecture: ${ARCH}" >> "${LOG_FILE}"
         exit 1
         ;;
 esac
 
 # Check for TUN device capability (required for WireGuard)
 if [ ! -c /dev/net/tun ]; then
-    echo "Warning: /dev/net/tun not found. NetBird requires TUN device support." >> "${SYNOPKG_TEMP_LOGFILE}"
+    echo "Warning: /dev/net/tun not found. NetBird requires TUN device support." >> "${LOG_FILE}"
+fi
+
+# ============================================================================
+# DNS Conflict Detection for Synology
+# ============================================================================
+# NetBird manages DNS resolution on its virtual network interface. This can
+# conflict with Synology's DNS-related packages and services.
+# ============================================================================
+
+DNS_CONFLICT_DETECTED=false
+DNS_CONFLICT_PACKAGES=""
+
+# Check for Synology DNS Server package
+if [ -d "/var/packages/DNSServer" ] || synopkg status DNSServer >/dev/null 2>&1; then
+    DNS_CONFLICT_DETECTED=true
+    DNS_CONFLICT_PACKAGES="${DNS_CONFLICT_PACKAGES}DNSServer "
+    echo "Warning: Synology DNS Server package detected." >> "${LOG_FILE}"
+fi
+
+# Check for DHCP Server (often used with DNS)
+if [ -d "/var/packages/DHCPServer" ] || synopkg status DHCPServer >/dev/null 2>&1; then
+    echo "Note: Synology DHCP Server package detected." >> "${LOG_FILE}"
+fi
+
+# Check for Directory Server (uses DNS)
+if [ -d "/var/packages/DirectoryServer" ] || synopkg status DirectoryServer >/dev/null 2>&1; then
+    DNS_CONFLICT_DETECTED=true
+    DNS_CONFLICT_PACKAGES="${DNS_CONFLICT_PACKAGES}DirectoryServer "
+    echo "Warning: Synology Directory Server package detected (uses DNS)." >> "${LOG_FILE}"
+fi
+
+# Check for Active Directory Domain (uses DNS extensively)
+if [ -d "/var/packages/ActiveDirectoryServer" ] || synopkg status ActiveDirectoryServer >/dev/null 2>&1; then
+    DNS_CONFLICT_DETECTED=true
+    DNS_CONFLICT_PACKAGES="${DNS_CONFLICT_PACKAGES}ActiveDirectoryServer "
+    echo "Warning: Synology Active Directory Server package detected (uses DNS)." >> "${LOG_FILE}"
+fi
+
+# Check if system is configured as a DNS server by examining resolv.conf
+if [ -f "/etc/resolv.conf" ]; then
+    if grep -q "127.0.0.1" /etc/resolv.conf 2>/dev/null; then
+        echo "Note: System appears to use local DNS resolver (127.0.0.1 in resolv.conf)." >> "${LOG_FILE}"
+    fi
+fi
+
+# Write DNS conflict status to a temp file for postinst to read
+DNS_STATUS_FILE="/tmp/.netbird_dns_conflict"
+if [ "${DNS_CONFLICT_DETECTED}" = "true" ]; then
+    echo "CONFLICT_DETECTED=true" > "${DNS_STATUS_FILE}"
+    echo "CONFLICT_PACKAGES=${DNS_CONFLICT_PACKAGES}" >> "${DNS_STATUS_FILE}"
+    echo "" >> "${LOG_FILE}"
+    echo "======================= DNS CONFLICT WARNING =======================" >> "${LOG_FILE}"
+    echo "The following DNS-related packages were detected: ${DNS_CONFLICT_PACKAGES}" >> "${LOG_FILE}"
+    echo "" >> "${LOG_FILE}"
+    echo "NetBird manages DNS resolution which may conflict with these services." >> "${LOG_FILE}"
+    echo "It is STRONGLY RECOMMENDED to enable 'Disable DNS Management' option" >> "${LOG_FILE}"
+    echo "during installation to prevent DNS conflicts." >> "${LOG_FILE}"
+    echo "====================================================================" >> "${LOG_FILE}"
+else
+    echo "CONFLICT_DETECTED=false" > "${DNS_STATUS_FILE}"
+    echo "No DNS conflicts detected." >> "${LOG_FILE}"
 fi
 
 exit 0
