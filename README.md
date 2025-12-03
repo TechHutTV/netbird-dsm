@@ -141,8 +141,7 @@ netbird-dsm/
 │   └── install                # Install script
 ├── conf/                      # Package configuration
 │   ├── privilege              # Privilege settings (run as root)
-│   ├── resource               # Resource declarations
-│   └── netbird.sc             # Firewall port configuration
+│   └── resource               # Resource declarations
 ├── scripts/                   # Lifecycle scripts
 │   ├── preinst                # Pre-installation
 │   ├── postinst               # Post-installation (downloads binary)

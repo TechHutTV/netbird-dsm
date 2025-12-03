@@ -8,8 +8,5 @@
                 }
             }
         ]
-    },
-    "port-config": {
-        "protocol-file": "conf/netbird.sc"
     }
 }
