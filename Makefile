@@ -15,7 +15,7 @@ SPK_DIR = $(BUILD_DIR)/spk
 # Package components
 SCRIPTS = scripts/preinst scripts/postinst scripts/preuninst scripts/postuninst \
           scripts/preupgrade scripts/postupgrade scripts/start-stop-status
-CONF_FILES = conf/privilege conf/resource conf/netbird.sc
+CONF_FILES = conf/privilege conf/resource
 WIZARD_FILES = WIZARD_UIFILES/install_uifile WIZARD_UIFILES/uninstall_uifile
 UI_FILES = ui/config ui/index.cgi
 
