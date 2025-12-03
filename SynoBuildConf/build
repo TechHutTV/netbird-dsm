@@ -1,0 +1,20 @@
+#!/bin/bash
+# Copyright (c) 2024 NetBird DSM Package
+# SPDX-License-Identifier: MIT
+
+# Build script for NetBird DSM package
+# This is a noarch package - no compilation needed
+
+case ${MakeClean} in
+    [Yy][Ee][Ss])
+        # Clean any generated files
+        rm -rf /tmp/netbird_build
+        ;;
+esac
+
+case ${MakeInstall} in
+    [Yy][Ee][Ss])
+        # Nothing to build - NetBird binary is downloaded at install time
+        exit 0
+        ;;
+esac

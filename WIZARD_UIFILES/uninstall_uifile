@@ -1,0 +1,23 @@
+[
+    {
+        "step_title": "Uninstall NetBird",
+        "items": [
+            {
+                "type": "textfield",
+                "desc": "This will disconnect your Synology NAS from your NetBird network and remove the NetBird application.",
+                "subitems": []
+            },
+            {
+                "type": "singleselect",
+                "desc": "Would you like to remove all configuration files?",
+                "subitems": [
+                    {
+                        "key": "pkgwizard_remove_config",
+                        "desc": "Remove all NetBird configuration and data",
+                        "defaultValue": false
+                    }
+                ]
+            }
+        ]
+    }
+]

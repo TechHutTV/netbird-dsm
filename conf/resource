@@ -1,0 +1,15 @@
+{
+    "data-share": {
+        "shares": [
+            {
+                "name": "netbird",
+                "permission": {
+                    "rw": ["root"]
+                }
+            }
+        ]
+    },
+    "port-config": {
+        "protocol-file": "conf/netbird.sc"
+    }
+}

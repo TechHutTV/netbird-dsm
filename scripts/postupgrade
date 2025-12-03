@@ -1,0 +1,30 @@
+#!/bin/bash
+# Copyright (c) 2024 NetBird DSM Package
+# SPDX-License-Identifier: MIT
+
+# Post-upgrade script
+# This script runs after the package is upgraded
+# Restore configuration files
+
+PACKAGE_DIR="/var/packages/${SYNOPKG_PKGNAME}"
+TARGET_DIR="${PACKAGE_DIR}/target"
+CONFIG_DIR="${TARGET_DIR}/etc"
+DATA_DIR="${TARGET_DIR}/var"
+BACKUP_DIR="/tmp/netbird_backup"
+LOG_FILE="${SYNOPKG_TEMP_LOGFILE:-/dev/null}"
+
+# Create directories
+mkdir -p "${CONFIG_DIR}"
+mkdir -p "${DATA_DIR}"
+
+echo "Restoring NetBird configuration..." >> "${LOG_FILE}"
+
+# Restore configuration files
+if [ -d "${BACKUP_DIR}" ]; then
+    cp -r "${BACKUP_DIR}"/* "${CONFIG_DIR}/" 2>/dev/null || true
+    rm -rf "${BACKUP_DIR}"
+fi
+
+echo "Configuration restored successfully" >> "${LOG_FILE}"
+
+exit 0

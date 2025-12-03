@@ -1,0 +1,54 @@
+[
+    {
+        "step_title": "NetBird Configuration",
+        "items": [
+            {
+                "type": "textfield",
+                "desc": "Enter your NetBird Management URL. Leave as default for NetBird Cloud.",
+                "subitems": [
+                    {
+                        "key": "pkgwizard_management_url",
+                        "desc": "Management URL",
+                        "defaultValue": "https://api.netbird.io:443",
+                        "validator": {
+                            "allowBlank": false,
+                            "regex": {
+                                "expr": "^https?://[^\\s]+$",
+                                "errorText": "Please enter a valid URL starting with http:// or https://"
+                            }
+                        }
+                    }
+                ]
+            },
+            {
+                "type": "textfield",
+                "desc": "Enter your NetBird Setup Key. This is required to join your NetBird network. You can obtain this from your NetBird dashboard.",
+                "subitems": [
+                    {
+                        "key": "pkgwizard_setup_key",
+                        "desc": "Setup Key",
+                        "defaultValue": "",
+                        "validator": {
+                            "allowBlank": true
+                        }
+                    }
+                ]
+            }
+        ]
+    },
+    {
+        "step_title": "Important Information",
+        "items": [
+            {
+                "type": "textfield",
+                "desc": "NetBird will create a secure WireGuard-based mesh network connection from your Synology NAS. The service will start automatically after installation if a setup key is provided.",
+                "subitems": []
+            },
+            {
+                "type": "textfield",
+                "desc": "You can change these settings later through the NetBird application settings in DSM Package Center.",
+                "subitems": []
+            }
+        ]
+    }
+]

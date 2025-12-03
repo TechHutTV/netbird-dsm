@@ -1,0 +1,14 @@
+{
+    "defaults": {
+        "run-as": "root"
+    },
+    "ctrl-script": {
+        "run-as": "root"
+    },
+    "executable": [
+        {
+            "target": "netbird",
+            "run-as": "root"
+        }
+    ]
+}
