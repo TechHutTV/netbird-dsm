@@ -1,0 +1,28 @@
+#!/bin/bash
+# Copyright (c) 2024 NetBird DSM Package
+# SPDX-License-Identifier: MIT
+
+# Install script for NetBird DSM package
+# Creates the package.tgz and SPK file
+
+PKG_NAME="netbird"
+PKG_DIR="${SYNOBUILD_DIR}/source/${PKG_NAME}"
+INSTALL_DIR="${SYNOBUILD_OUTPUT_DIR}"
+
+# Create package directory structure
+mkdir -p "${INSTALL_DIR}/target/bin"
+mkdir -p "${INSTALL_DIR}/target/etc"
+mkdir -p "${INSTALL_DIR}/target/var"
+
+# Create placeholder for netbird binary (downloaded at install time)
+touch "${INSTALL_DIR}/target/bin/.placeholder"
+
+# Copy UI files
+if [ -d "${PKG_DIR}/ui" ]; then
+    cp -r "${PKG_DIR}/ui" "${INSTALL_DIR}/"
+fi
+
+# Set permissions for CGI script
+if [ -f "${INSTALL_DIR}/ui/index.cgi" ]; then
+    chmod 755 "${INSTALL_DIR}/ui/index.cgi"
+fi

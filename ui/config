@@ -1,0 +1,16 @@
+{
+    ".url": {
+        "com.netbird.netbird": {
+            "title": "NetBird",
+            "desc": "NetBird Settings",
+            "icon": "images/netbird-{0}.png",
+            "type": "url",
+            "protocol": "http",
+            "port": "",
+            "url": "index.cgi",
+            "allUsers": false,
+            "grantPrivilege": "local",
+            "advanceGrantPrivilege": true
+        }
+    }
+}

@@ -1,0 +1,27 @@
+#!/bin/bash
+# Copyright (c) 2024 NetBird DSM Package
+# SPDX-License-Identifier: MIT
+
+# Pre-upgrade script
+# This script runs before the package is upgraded
+# Backup configuration files
+
+PACKAGE_DIR="/var/packages/${SYNOPKG_PKGNAME}"
+TARGET_DIR="${PACKAGE_DIR}/target"
+CONFIG_DIR="${TARGET_DIR}/etc"
+BACKUP_DIR="/tmp/netbird_backup"
+LOG_FILE="${SYNOPKG_TEMP_LOGFILE:-/dev/null}"
+
+echo "Backing up NetBird configuration..." >> "${LOG_FILE}"
+
+# Create backup directory
+mkdir -p "${BACKUP_DIR}"
+
+# Backup configuration files
+if [ -d "${CONFIG_DIR}" ]; then
+    cp -r "${CONFIG_DIR}"/* "${BACKUP_DIR}/" 2>/dev/null || true
+fi
+
+echo "Configuration backed up to ${BACKUP_DIR}" >> "${LOG_FILE}"
+
+exit 0

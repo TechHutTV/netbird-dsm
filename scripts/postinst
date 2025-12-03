@@ -1,0 +1,100 @@
+#!/bin/bash
+# Copyright (c) 2024 NetBird DSM Package
+# SPDX-License-Identifier: MIT
+
+# Post-installation script
+# This script runs after the package is installed
+# Environment variables from WIZARD_UIFILES are available here
+
+PACKAGE_DIR="/var/packages/${SYNOPKG_PKGNAME}"
+TARGET_DIR="${PACKAGE_DIR}/target"
+CONFIG_DIR="${TARGET_DIR}/etc"
+DATA_DIR="${TARGET_DIR}/var"
+LOG_FILE="${SYNOPKG_TEMP_LOGFILE:-/dev/null}"
+
+# Create necessary directories
+mkdir -p "${CONFIG_DIR}"
+mkdir -p "${DATA_DIR}"
+mkdir -p "${TARGET_DIR}/bin"
+
+# Determine system architecture and download appropriate NetBird binary
+ARCH=$(uname -m)
+NETBIRD_VERSION="0.60.4"
+NETBIRD_BASE_URL="https://github.com/netbirdio/netbird/releases/download/v${NETBIRD_VERSION}"
+
+case "${ARCH}" in
+    x86_64|amd64)
+        NETBIRD_ARCH="linux_amd64"
+        ;;
+    aarch64|arm64)
+        NETBIRD_ARCH="linux_arm64"
+        ;;
+    armv7l|armhf)
+        NETBIRD_ARCH="linux_armv6"
+        ;;
+    *)
+        echo "Unsupported architecture: ${ARCH}" >> "${LOG_FILE}"
+        exit 1
+        ;;
+esac
+
+NETBIRD_TAR="netbird_${NETBIRD_VERSION}_${NETBIRD_ARCH}.tar.gz"
+DOWNLOAD_URL="${NETBIRD_BASE_URL}/${NETBIRD_TAR}"
+
+echo "Downloading NetBird v${NETBIRD_VERSION} for ${ARCH}..." >> "${LOG_FILE}"
+
+# Download NetBird binary
+cd /tmp
+if ! curl -fsSL -o "${NETBIRD_TAR}" "${DOWNLOAD_URL}"; then
+    echo "Failed to download NetBird from ${DOWNLOAD_URL}" >> "${LOG_FILE}"
+    exit 1
+fi
+
+# Extract and install binary
+if ! tar -xzf "${NETBIRD_TAR}" -C "${TARGET_DIR}/bin" netbird; then
+    echo "Failed to extract NetBird binary" >> "${LOG_FILE}"
+    rm -f "${NETBIRD_TAR}"
+    exit 1
+fi
+
+rm -f "${NETBIRD_TAR}"
+chmod +x "${TARGET_DIR}/bin/netbird"
+
+echo "NetBird binary installed successfully" >> "${LOG_FILE}"
+
+# Create config file from wizard inputs
+CONFIG_FILE="${CONFIG_DIR}/netbird.json"
+
+# Default management URL
+MGMT_URL="${pkgwizard_management_url:-https://api.netbird.io:443}"
+SETUP_KEY="${pkgwizard_setup_key:-}"
+
+# Create initial configuration
+cat > "${CONFIG_FILE}" << EOF
+{
+    "ManagementURL": "${MGMT_URL}",
+    "SetupKey": "${SETUP_KEY}",
+    "AdminURL": "",
+    "ConfigPath": "${CONFIG_DIR}/config.json",
+    "LogFile": "${DATA_DIR}/netbird.log",
+    "LogLevel": "info"
+}
+EOF
+
+chmod 600 "${CONFIG_FILE}"
+
+echo "Configuration file created at ${CONFIG_FILE}" >> "${LOG_FILE}"
+
+# If setup key was provided during installation, configure NetBird
+if [ -n "${SETUP_KEY}" ]; then
+    echo "Setup key provided, configuring NetBird..." >> "${LOG_FILE}"
+    "${TARGET_DIR}/bin/netbird" up \
+        --setup-key "${SETUP_KEY}" \
+        --management-url "${MGMT_URL}" \
+        --config "${CONFIG_DIR}/config.json" \
+        --log-file "${DATA_DIR}/netbird.log" \
+        --daemon-addr "unix://${DATA_DIR}/netbird.sock" \
+        2>> "${LOG_FILE}" || true
+fi
+
+exit 0

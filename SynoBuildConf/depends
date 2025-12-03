@@ -1,0 +1,6 @@
+# NetBird DSM Package Dependencies
+# This package has no build-time dependencies as it downloads
+# pre-built NetBird binaries during installation
+
+[default]
+all="7.0"

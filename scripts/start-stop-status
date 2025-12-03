@@ -1,0 +1,187 @@
+#!/bin/bash
+# Copyright (c) 2024 NetBird DSM Package
+# SPDX-License-Identifier: MIT
+
+# Start-stop-status script for NetBird service
+# This script manages the NetBird daemon lifecycle
+
+PACKAGE_DIR="/var/packages/${SYNOPKG_PKGNAME}"
+TARGET_DIR="${PACKAGE_DIR}/target"
+CONFIG_DIR="${TARGET_DIR}/etc"
+DATA_DIR="${TARGET_DIR}/var"
+NETBIRD_BIN="${TARGET_DIR}/bin/netbird"
+NETBIRD_CONFIG="${CONFIG_DIR}/config.json"
+NETBIRD_LOG="${DATA_DIR}/netbird.log"
+NETBIRD_SOCK="${DATA_DIR}/netbird.sock"
+PID_FILE="${DATA_DIR}/netbird.pid"
+LOG_FILE="${SYNOPKG_TEMP_LOGFILE:-/dev/null}"
+
+# Load custom settings if available
+SETTINGS_FILE="${CONFIG_DIR}/netbird.json"
+if [ -f "${SETTINGS_FILE}" ]; then
+    MGMT_URL=$(grep -oP '"ManagementURL"\s*:\s*"\K[^"]+' "${SETTINGS_FILE}" 2>/dev/null || echo "https://api.netbird.io:443")
+else
+    MGMT_URL="https://api.netbird.io:443"
+fi
+
+start_daemon() {
+    echo "Starting NetBird daemon..." >> "${LOG_FILE}"
+
+    # Ensure directories exist
+    mkdir -p "${CONFIG_DIR}"
+    mkdir -p "${DATA_DIR}"
+
+    # Check if binary exists
+    if [ ! -x "${NETBIRD_BIN}" ]; then
+        echo "NetBird binary not found at ${NETBIRD_BIN}" >> "${LOG_FILE}"
+        return 1
+    fi
+
+    # Check if already running
+    if is_running; then
+        echo "NetBird is already running" >> "${LOG_FILE}"
+        return 0
+    fi
+
+    # Start the NetBird service daemon
+    nohup "${NETBIRD_BIN}" service run \
+        --config "${NETBIRD_CONFIG}" \
+        --log-file "${NETBIRD_LOG}" \
+        --log-level info \
+        --daemon-addr "unix://${NETBIRD_SOCK}" \
+        >> "${NETBIRD_LOG}" 2>&1 &
+
+    PID=$!
+    echo "${PID}" > "${PID_FILE}"
+
+    # Wait a moment for the service to start
+    sleep 2
+
+    if is_running; then
+        echo "NetBird daemon started with PID ${PID}" >> "${LOG_FILE}"
+
+        # Connect to the network if configured
+        if [ -f "${NETBIRD_CONFIG}" ]; then
+            "${NETBIRD_BIN}" up \
+                --config "${NETBIRD_CONFIG}" \
+                --daemon-addr "unix://${NETBIRD_SOCK}" \
+                >> "${LOG_FILE}" 2>&1 || true
+        fi
+
+        return 0
+    else
+        echo "Failed to start NetBird daemon" >> "${LOG_FILE}"
+        rm -f "${PID_FILE}"
+        return 1
+    fi
+}
+
+stop_daemon() {
+    echo "Stopping NetBird daemon..." >> "${LOG_FILE}"
+
+    # Disconnect from the network gracefully
+    if [ -x "${NETBIRD_BIN}" ] && [ -S "${NETBIRD_SOCK}" ]; then
+        "${NETBIRD_BIN}" down \
+            --config "${NETBIRD_CONFIG}" \
+            --daemon-addr "unix://${NETBIRD_SOCK}" \
+            >> "${LOG_FILE}" 2>&1 || true
+    fi
+
+    # Stop the daemon process
+    if [ -f "${PID_FILE}" ]; then
+        PID=$(cat "${PID_FILE}")
+        if [ -n "${PID}" ] && kill -0 "${PID}" 2>/dev/null; then
+            kill "${PID}" 2>/dev/null
+
+            # Wait for process to stop
+            for i in $(seq 1 10); do
+                if ! kill -0 "${PID}" 2>/dev/null; then
+                    break
+                fi
+                sleep 1
+            done
+
+            # Force kill if still running
+            if kill -0 "${PID}" 2>/dev/null; then
+                kill -9 "${PID}" 2>/dev/null
+            fi
+        fi
+        rm -f "${PID_FILE}"
+    fi
+
+    # Also try to kill by process name
+    pkill -f "netbird.*service run" 2>/dev/null || true
+
+    # Clean up socket file
+    rm -f "${NETBIRD_SOCK}"
+
+    echo "NetBird daemon stopped" >> "${LOG_FILE}"
+    return 0
+}
+
+is_running() {
+    # Check PID file
+    if [ -f "${PID_FILE}" ]; then
+        PID=$(cat "${PID_FILE}")
+        if [ -n "${PID}" ] && kill -0 "${PID}" 2>/dev/null; then
+            return 0
+        fi
+    fi
+
+    # Check for running process
+    if pgrep -f "netbird.*service run" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    return 1
+}
+
+get_status() {
+    if is_running; then
+        # Get connection status if possible
+        if [ -x "${NETBIRD_BIN}" ] && [ -S "${NETBIRD_SOCK}" ]; then
+            STATUS=$("${NETBIRD_BIN}" status \
+                --config "${NETBIRD_CONFIG}" \
+                --daemon-addr "unix://${NETBIRD_SOCK}" \
+                2>/dev/null | head -1 || echo "Running")
+            echo "${STATUS}" >> "${LOG_FILE}"
+        fi
+        return 0
+    else
+        return 1
+    fi
+}
+
+case "$1" in
+    start)
+        start_daemon
+        exit $?
+        ;;
+    stop)
+        stop_daemon
+        exit $?
+        ;;
+    status)
+        if get_status; then
+            exit 0
+        else
+            exit 1
+        fi
+        ;;
+    restart)
+        stop_daemon
+        sleep 2
+        start_daemon
+        exit $?
+        ;;
+    log)
+        if [ -f "${NETBIRD_LOG}" ]; then
+            tail -n 100 "${NETBIRD_LOG}"
+        fi
+        exit 0
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|status|restart|log}"
+        exit 1
+        ;;
+esac

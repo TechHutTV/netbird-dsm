@@ -1,0 +1,32 @@
+#!/bin/bash
+# Copyright (c) 2024 NetBird DSM Package
+# SPDX-License-Identifier: MIT
+
+# Pre-installation script
+# This script runs before the package is installed
+# It should only check conditions and not modify the system
+
+# Check if we're on a supported architecture
+ARCH=$(uname -m)
+case "${ARCH}" in
+    x86_64|amd64)
+        # Supported
+        ;;
+    aarch64|arm64)
+        # Supported
+        ;;
+    armv7l|armhf)
+        # Supported
+        ;;
+    *)
+        echo "Unsupported architecture: ${ARCH}" >> "${SYNOPKG_TEMP_LOGFILE}"
+        exit 1
+        ;;
+esac
+
+# Check for TUN device capability (required for WireGuard)
+if [ ! -c /dev/net/tun ]; then
+    echo "Warning: /dev/net/tun not found. NetBird requires TUN device support." >> "${SYNOPKG_TEMP_LOGFILE}"
+fi
+
+exit 0

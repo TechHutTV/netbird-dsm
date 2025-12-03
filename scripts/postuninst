@@ -1,0 +1,13 @@
+#!/bin/bash
+# Copyright (c) 2024 NetBird DSM Package
+# SPDX-License-Identifier: MIT
+
+# Post-uninstallation script
+# This script runs after the package is uninstalled
+# Clean up any remaining files
+
+LOG_FILE="${SYNOPKG_TEMP_LOGFILE:-/dev/null}"
+
+echo "NetBird package uninstalled successfully" >> "${LOG_FILE}"
+
+exit 0

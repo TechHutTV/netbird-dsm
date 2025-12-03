@@ -1,0 +1,31 @@
+#!/bin/bash
+# Copyright (c) 2024 NetBird DSM Package
+# SPDX-License-Identifier: MIT
+
+# Pre-uninstallation script
+# This script runs before the package is uninstalled
+# Stop the service gracefully
+
+PACKAGE_DIR="/var/packages/${SYNOPKG_PKGNAME}"
+TARGET_DIR="${PACKAGE_DIR}/target"
+CONFIG_DIR="${TARGET_DIR}/etc"
+DATA_DIR="${TARGET_DIR}/var"
+NETBIRD_BIN="${TARGET_DIR}/bin/netbird"
+LOG_FILE="${SYNOPKG_TEMP_LOGFILE:-/dev/null}"
+
+echo "Stopping NetBird service..." >> "${LOG_FILE}"
+
+# Disconnect from the network gracefully
+if [ -x "${NETBIRD_BIN}" ]; then
+    "${NETBIRD_BIN}" down \
+        --config "${CONFIG_DIR}/config.json" \
+        --daemon-addr "unix://${DATA_DIR}/netbird.sock" \
+        2>> "${LOG_FILE}" || true
+fi
+
+# Stop the daemon if running
+pkill -f "netbird.*service run" 2>/dev/null || true
+
+sleep 2
+
+exit 0
