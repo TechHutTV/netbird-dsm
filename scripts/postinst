@@ -69,6 +69,28 @@ CONFIG_FILE="${CONFIG_DIR}/netbird.json"
 MGMT_URL="${pkgwizard_management_url:-https://api.netbird.io:443}"
 SETUP_KEY="${pkgwizard_setup_key:-}"
 
+# DNS Management setting from wizard
+# "true" means DNS management is disabled (safer for Synology with DNS services)
+DISABLE_DNS="${pkgwizard_disable_dns:-false}"
+
+# Check for DNS conflict detection from preinst
+DNS_STATUS_FILE="/tmp/.netbird_dns_conflict"
+DNS_CONFLICT_DETECTED=false
+if [ -f "${DNS_STATUS_FILE}" ]; then
+    source "${DNS_STATUS_FILE}"
+    DNS_CONFLICT_DETECTED="${CONFLICT_DETECTED:-false}"
+    rm -f "${DNS_STATUS_FILE}"
+fi
+
+# Auto-enable disable_dns if conflicts were detected and user didn't explicitly set it
+if [ "${DNS_CONFLICT_DETECTED}" = "true" ] && [ "${DISABLE_DNS}" != "true" ]; then
+    echo "DNS conflicts detected, recommending DNS management be disabled." >> "${LOG_FILE}"
+    # Note: We don't auto-enable, just log the recommendation
+    # The wizard should have prompted the user
+fi
+
+echo "DNS Management disabled: ${DISABLE_DNS}" >> "${LOG_FILE}"
+
 # Create initial configuration
 cat > "${CONFIG_FILE}" << EOF
 {
@@ -77,7 +99,8 @@ cat > "${CONFIG_FILE}" << EOF
     "AdminURL": "",
     "ConfigPath": "${CONFIG_DIR}/config.json",
     "LogFile": "${DATA_DIR}/netbird.log",
-    "LogLevel": "info"
+    "LogLevel": "info",
+    "DisableDNS": ${DISABLE_DNS}
 }
 EOF
 
@@ -85,16 +108,29 @@ chmod 600 "${CONFIG_FILE}"
 
 echo "Configuration file created at ${CONFIG_FILE}" >> "${LOG_FILE}"
 
+# Build netbird up command with optional --disable-dns flag
+NETBIRD_UP_CMD="${TARGET_DIR}/bin/netbird up"
+NETBIRD_UP_CMD="${NETBIRD_UP_CMD} --config ${CONFIG_DIR}/config.json"
+NETBIRD_UP_CMD="${NETBIRD_UP_CMD} --log-file ${DATA_DIR}/netbird.log"
+NETBIRD_UP_CMD="${NETBIRD_UP_CMD} --daemon-addr unix://${DATA_DIR}/netbird.sock"
+
+if [ -n "${SETUP_KEY}" ]; then
+    NETBIRD_UP_CMD="${NETBIRD_UP_CMD} --setup-key ${SETUP_KEY}"
+fi
+
+if [ -n "${MGMT_URL}" ]; then
+    NETBIRD_UP_CMD="${NETBIRD_UP_CMD} --management-url ${MGMT_URL}"
+fi
+
+if [ "${DISABLE_DNS}" = "true" ]; then
+    NETBIRD_UP_CMD="${NETBIRD_UP_CMD} --disable-dns"
+    echo "DNS management disabled - NetBird will not modify system DNS settings." >> "${LOG_FILE}"
+fi
+
 # If setup key was provided during installation, configure NetBird
 if [ -n "${SETUP_KEY}" ]; then
     echo "Setup key provided, configuring NetBird..." >> "${LOG_FILE}"
-    "${TARGET_DIR}/bin/netbird" up \
-        --setup-key "${SETUP_KEY}" \
-        --management-url "${MGMT_URL}" \
-        --config "${CONFIG_DIR}/config.json" \
-        --log-file "${DATA_DIR}/netbird.log" \
-        --daemon-addr "unix://${DATA_DIR}/netbird.sock" \
-        2>> "${LOG_FILE}" || true
+    eval "${NETBIRD_UP_CMD}" 2>> "${LOG_FILE}" || true
 fi
 
 exit 0

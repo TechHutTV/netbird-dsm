@@ -20,8 +20,11 @@ LOG_FILE="${SYNOPKG_TEMP_LOGFILE:-/dev/null}"
 SETTINGS_FILE="${CONFIG_DIR}/netbird.json"
 if [ -f "${SETTINGS_FILE}" ]; then
     MGMT_URL=$(grep -oP '"ManagementURL"\s*:\s*"\K[^"]+' "${SETTINGS_FILE}" 2>/dev/null || echo "https://api.netbird.io:443")
+    # Read DisableDNS setting (boolean in JSON, so look for true/false without quotes)
+    DISABLE_DNS=$(grep -oP '"DisableDNS"\s*:\s*\K(true|false)' "${SETTINGS_FILE}" 2>/dev/null || echo "false")
 else
     MGMT_URL="https://api.netbird.io:443"
+    DISABLE_DNS="false"
 fi
 
 start_daemon() {
@@ -62,10 +65,13 @@ start_daemon() {
 
         # Connect to the network if configured
         if [ -f "${NETBIRD_CONFIG}" ]; then
-            "${NETBIRD_BIN}" up \
-                --config "${NETBIRD_CONFIG}" \
-                --daemon-addr "unix://${NETBIRD_SOCK}" \
-                >> "${LOG_FILE}" 2>&1 || true
+            # Build up command with optional --disable-dns flag
+            UP_CMD="${NETBIRD_BIN} up --config ${NETBIRD_CONFIG} --daemon-addr unix://${NETBIRD_SOCK}"
+            if [ "${DISABLE_DNS}" = "true" ]; then
+                UP_CMD="${UP_CMD} --disable-dns"
+                echo "DNS management disabled for this connection." >> "${LOG_FILE}"
+            fi
+            eval "${UP_CMD}" >> "${LOG_FILE}" 2>&1 || true
         fi
 
         return 0
