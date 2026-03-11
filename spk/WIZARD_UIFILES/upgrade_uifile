@@ -1,0 +1,22 @@
+[{
+    "step_title": "NetBird Upgrade",
+    "items": [{
+        "desc": "NetBird will be upgraded. Your existing configuration will be preserved. Optionally update your setup key or management URL below."
+    }, {
+        "type": "textfield",
+        "desc": "Setup Key (leave blank to keep current)",
+        "subitems": [{
+            "key": "wizard_setup_key",
+            "desc": "Setup Key",
+            "emptyText": "Leave blank to keep current key"
+        }]
+    }, {
+        "type": "textfield",
+        "desc": "Management URL (leave blank to keep current)",
+        "subitems": [{
+            "key": "wizard_management_url",
+            "desc": "Management URL",
+            "emptyText": "Leave blank to keep current URL"
+        }]
+    }]
+}]

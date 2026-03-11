@@ -1,0 +1,28 @@
+[{
+    "step_title": "NetBird Configuration",
+    "items": [{
+        "desc": "Configure your NetBird connection. You can change these settings later from the NetBird app in DSM."
+    }, {
+        "type": "textfield",
+        "desc": "Setup Key (from your NetBird dashboard)",
+        "subitems": [{
+            "key": "wizard_setup_key",
+            "desc": "Setup Key",
+            "emptyText": "Enter your setup key",
+            "validator": {
+                "allowBlank": false
+            }
+        }]
+    }, {
+        "type": "textfield",
+        "desc": "Management URL",
+        "subitems": [{
+            "key": "wizard_management_url",
+            "desc": "Management URL",
+            "defaultValue": "https://api.netbird.io:443",
+            "validator": {
+                "allowBlank": false
+            }
+        }]
+    }]
+}]

@@ -1,0 +1,12 @@
+{
+  ".url": {
+    "SYNO.SDS.Netbird": {
+      "type": "url",
+      "title": "NetBird",
+      "desc": "NetBird Client Status",
+      "icon": "PACKAGE_ICON_256.PNG",
+      "url": "/webman/3rdparty/netbird/index.cgi/",
+      "allUsers": true
+    }
+  }
+}

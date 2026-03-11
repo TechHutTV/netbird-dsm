@@ -1,0 +1,11 @@
+{
+  "port-config": {
+    "protocol-file": "conf/Netbird.sc"
+  },
+  "usr-local-linker": {
+    "bin": ["bin/netbird"]
+  },
+  "syslog-config": {
+    "logrotate-relpath": "conf/logrotate.conf"
+  }
+}

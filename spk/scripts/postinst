@@ -1,0 +1,16 @@
+#!/bin/sh
+
+# Ensure binary is executable (DSM may strip execute bit on package-owned files)
+chmod +x "${SYNOPKG_PKGDEST}/bin/netbird"
+
+# Save wizard values for the daemon to use after it starts
+SETTINGS_FILE="${SYNOPKG_PKGVAR}/wizard_settings"
+
+if [ -n "${wizard_setup_key}" ]; then
+    echo "SETUP_KEY=${wizard_setup_key}" > "${SETTINGS_FILE}"
+    if [ -n "${wizard_management_url}" ]; then
+        echo "MANAGEMENT_URL=${wizard_management_url}" >> "${SETTINGS_FILE}"
+    fi
+fi
+
+exit 0

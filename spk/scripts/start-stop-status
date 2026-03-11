@@ -1,0 +1,157 @@
+#!/bin/sh
+
+SERVICE_NAME="netbird"
+
+PKGVAR="${SYNOPKG_PKGVAR}"
+PKGDEST="${SYNOPKG_PKGDEST}"
+
+PID_FILE="${PKGVAR}/netbird.pid"
+LOG_FILE="${PKGVAR}/netbird.log"
+CONFIG_FILE="${PKGVAR}/config.json"
+SOCKET_FILE="${PKGVAR}/netbird.sock"
+SETTINGS_FILE="${PKGVAR}/wizard_settings"
+DAEMON_ADDR="unix://${SOCKET_FILE}"
+
+# NetBird bundles wireguard-go, so kernel WireGuard is never needed.
+export NB_WG_KERNEL_DISABLED=true
+
+# Use netstack mode for full userspace networking (no TUN device needed).
+export NB_USE_NETSTACK_MODE=true
+
+# Redirect NetBird state/config directories to the package var directory.
+# Without this, NetBird tries to write to /var/lib/netbird/ and /var/run/
+# which the package user doesn't have permission for.
+export NB_STATE_DIR="${PKGVAR}"
+export NB_CONFIG="${CONFIG_FILE}"
+export NB_DAEMON_ADDR="${DAEMON_ADDR}"
+export HOME="${PKGVAR}"
+
+start_daemon() {
+    # Ensure var directory is writable
+    mkdir -p "${PKGVAR}"
+
+    # Ensure binary is executable
+    chmod +x "${PKGDEST}/bin/netbird" 2>/dev/null
+
+    ensure_tun_created
+
+    # If TUN device is still not available, force userspace router mode
+    if [ ! -c /dev/net/tun ]; then
+        export NB_FORCE_USERSPACE_ROUTER=true
+        echo "$(date) TUN device not available, using userspace router" >>"${LOG_FILE}"
+    fi
+
+    echo "$(date) Starting ${SERVICE_NAME}..." >>"${LOG_FILE}"
+
+    nohup "${PKGDEST}/bin/netbird" service run \
+        --config "${CONFIG_FILE}" \
+        --log-file "${LOG_FILE}" \
+        --log-level info \
+        --daemon-addr "${DAEMON_ADDR}" \
+        >>"${LOG_FILE}" 2>&1 &
+
+    echo $! >"${PID_FILE}"
+
+    # Give the daemon a moment to start (or crash)
+    sleep 2
+
+    if daemon_status; then
+        echo "$(date) ${SERVICE_NAME} started successfully (PID=$(cat "${PID_FILE}"))" >>"${LOG_FILE}"
+        return 0
+    else
+        echo "$(date) ${SERVICE_NAME} failed to start" >>"${LOG_FILE}"
+        rm -f "${PID_FILE}"
+        return 1
+    fi
+}
+
+stop_daemon() {
+    if [ -r "${PID_FILE}" ]; then
+        PID=$(cat "${PID_FILE}")
+        echo "$(date) Stopping ${SERVICE_NAME} PID=${PID}" >>"${LOG_FILE}"
+        kill -TERM "${PID}" 2>/dev/null
+        wait_for_status 1 || kill -KILL "${PID}" 2>/dev/null
+        rm -f "${PID_FILE}"
+    fi
+}
+
+daemon_status() {
+    if [ -r "${PID_FILE}" ]; then
+        PID=$(cat "${PID_FILE}")
+        if kill -0 "${PID}" 2>/dev/null; then
+            return 0
+        fi
+        rm -f "${PID_FILE}"
+    fi
+    return 1
+}
+
+wait_for_status() {
+    counter=20
+    while [ ${counter} -gt 0 ]; do
+        daemon_status
+        [ $? -eq "$1" ] && return 0
+        counter=$((counter - 1))
+        sleep 1
+    done
+    return 1
+}
+
+ensure_tun_created() {
+    # Try to load TUN kernel module
+    if ! lsmod 2>/dev/null | grep -q "^tun "; then
+        modprobe tun 2>/dev/null || insmod /lib/modules/tun.ko 2>/dev/null || true
+    fi
+
+    # Create /dev/net/tun if missing
+    if [ ! -c /dev/net/tun ]; then
+        if [ ! -d /dev/net ]; then
+            mkdir -m 755 /dev/net
+        fi
+        mknod /dev/net/tun c 10 200 2>/dev/null
+        chmod 0755 /dev/net/tun 2>/dev/null
+    fi
+}
+
+apply_wizard_settings() {
+    if [ -f "${SETTINGS_FILE}" ]; then
+        . "${SETTINGS_FILE}"
+        sleep 3
+
+        UP_ARGS="--config ${CONFIG_FILE}"
+        if [ -n "${SETUP_KEY}" ]; then
+            UP_ARGS="${UP_ARGS} --setup-key ${SETUP_KEY}"
+        fi
+        if [ -n "${MANAGEMENT_URL}" ]; then
+            UP_ARGS="${UP_ARGS} --management-url ${MANAGEMENT_URL}"
+        fi
+
+        "${PKGDEST}/bin/netbird" --daemon-addr "${DAEMON_ADDR}" up ${UP_ARGS} >>"${LOG_FILE}" 2>&1
+        rm -f "${SETTINGS_FILE}"
+    fi
+}
+
+case "$1" in
+start)
+    if daemon_status; then
+        exit 0
+    fi
+    start_daemon
+    RC=$?
+    apply_wizard_settings &
+    exit ${RC}
+    ;;
+stop)
+    if daemon_status; then
+        stop_daemon
+    fi
+    exit 0
+    ;;
+status)
+    if daemon_status; then
+        exit 0
+    else
+        exit 3
+    fi
+    ;;
+esac

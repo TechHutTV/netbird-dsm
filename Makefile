@@ -1,95 +1,110 @@
-# NetBird DSM Package Makefile
-# Copyright (c) 2024 NetBird DSM Package
-# SPDX-License-Identifier: MIT
+# NetBird Synology DSM Package Builder
+# Usage:
+#   make download && make package   # Download pre-built binary and build SPK
+#   make build && make package      # Build from source and build SPK
+#   make clean                      # Remove build artifacts
 
-PKG_NAME = netbird
-PKG_VERSION = 0.60.4
-PKG_RELEASE = 0001
-FULL_VERSION = $(PKG_VERSION)-$(PKG_RELEASE)
+VERSION := $(shell cat VERSION)
+ARCH := x86_64
+SPK_NAME := netbird-$(ARCH)-$(VERSION).spk
+
+# For building from source (optional)
+NETBIRD_SRC ?= .
+GOFLAGS := CGO_ENABLED=0 GOOS=linux GOARCH=amd64
+
+# GitHub release URL for downloading pre-built binary
+RELEASE_URL := https://github.com/netbirdio/netbird/releases/download/v$(VERSION)/netbird_$(VERSION)_linux_amd64.tar.gz
 
 # Directories
-BUILD_DIR = build
-DIST_DIR = dist
-SPK_DIR = $(BUILD_DIR)/spk
+SPK_DIR := spk
+PKG_DIR := $(SPK_DIR)/package
+BIN_DIR := $(PKG_DIR)/bin
+BUILD_DIR := build
 
-# Package components
-SCRIPTS = scripts/preinst scripts/postinst scripts/preuninst scripts/postuninst \
-          scripts/preupgrade scripts/postupgrade scripts/start-stop-status
-CONF_FILES = conf/privilege conf/resource
-WIZARD_FILES = WIZARD_UIFILES/install_uifile WIZARD_UIFILES/uninstall_uifile
-UI_FILES = ui/config ui/index.cgi
+.PHONY: all build download package clean check-binary
 
-.PHONY: all clean package info spk
+all: package
 
-all: spk
+# Download pre-built NetBird binary from GitHub releases
+download:
+	@echo "Downloading NetBird v$(VERSION) for linux/amd64..."
+	@mkdir -p $(BIN_DIR) $(BUILD_DIR)
+	curl -fSL "$(RELEASE_URL)" -o $(BUILD_DIR)/netbird.tar.gz
+	tar -xzf $(BUILD_DIR)/netbird.tar.gz -C $(BUILD_DIR)/
+	cp $(BUILD_DIR)/netbird $(BIN_DIR)/netbird
+	chmod +x $(BIN_DIR)/netbird
+	@echo "Binary downloaded to $(BIN_DIR)/netbird"
 
-# Create INFO file from INFO.sh
-info: $(BUILD_DIR)/INFO
+# Build NetBird from source (requires Go 1.23+ and NetBird source)
+build:
+	@echo "Building NetBird v$(VERSION) from source..."
+	@mkdir -p $(BIN_DIR)
+	cd $(NETBIRD_SRC) && $(GOFLAGS) go build \
+		-ldflags "-s -w -X github.com/netbirdio/netbird/version.version=$(VERSION)" \
+		-o $(abspath $(BIN_DIR))/netbird \
+		./client/
+	@echo "Binary built at $(BIN_DIR)/netbird"
 
-$(BUILD_DIR)/INFO: INFO.sh
-	@mkdir -p $(BUILD_DIR)
-	@echo "Generating INFO file..."
-	@bash INFO.sh > $(BUILD_DIR)/INFO
+# Verify binary exists before packaging
+check-binary:
+	@test -f $(BIN_DIR)/netbird || { echo "Error: $(BIN_DIR)/netbird not found. Run 'make download' or 'make build' first."; exit 1; }
 
-# Create package.tgz
-package: $(BUILD_DIR)/package.tgz
-
-$(BUILD_DIR)/package.tgz:
-	@mkdir -p $(BUILD_DIR)/package/target/bin
-	@mkdir -p $(BUILD_DIR)/package/target/etc
-	@mkdir -p $(BUILD_DIR)/package/target/var
-	@touch $(BUILD_DIR)/package/target/bin/.placeholder
-	@cp -r ui $(BUILD_DIR)/package/ 2>/dev/null || true
-	@chmod 755 $(BUILD_DIR)/package/ui/index.cgi 2>/dev/null || true
-	@echo "Creating package.tgz..."
-	@cd $(BUILD_DIR)/package && tar -czf ../package.tgz *
-
-# Build SPK package
-spk: info package
-	@mkdir -p $(SPK_DIR)
-	@mkdir -p $(DIST_DIR)
+# Build the SPK package
+package: check-binary
 	@echo "Building SPK package..."
-	# Copy INFO
-	@cp $(BUILD_DIR)/INFO $(SPK_DIR)/
-	# Copy package.tgz
-	@cp $(BUILD_DIR)/package.tgz $(SPK_DIR)/
-	# Copy scripts
-	@mkdir -p $(SPK_DIR)/scripts
-	@cp $(SCRIPTS) $(SPK_DIR)/scripts/
-	@chmod 755 $(SPK_DIR)/scripts/*
-	# Copy conf files
-	@mkdir -p $(SPK_DIR)/conf
-	@cp $(CONF_FILES) $(SPK_DIR)/conf/
-	# Copy wizard files
-	@mkdir -p $(SPK_DIR)/WIZARD_UIFILES
-	@cp $(WIZARD_FILES) $(SPK_DIR)/WIZARD_UIFILES/
-	# Copy icons
-	@cp icons/PACKAGE_ICON.PNG $(SPK_DIR)/ 2>/dev/null || echo "Warning: PACKAGE_ICON.PNG not found"
-	@cp icons/PACKAGE_ICON_256.PNG $(SPK_DIR)/ 2>/dev/null || echo "Warning: PACKAGE_ICON_256.PNG not found"
-	# Create SPK archive
-	@cd $(SPK_DIR) && tar -cf ../../$(DIST_DIR)/$(PKG_NAME)-$(FULL_VERSION).spk *
-	@echo ""
-	@echo "========================================="
-	@echo "SPK package created successfully!"
-	@echo "Output: $(DIST_DIR)/$(PKG_NAME)-$(FULL_VERSION).spk"
-	@echo "========================================="
+	@mkdir -p $(BUILD_DIR)
 
-# Clean build artifacts
+	# Create package.tgz from package/ contents
+	@echo "Creating package.tgz..."
+	cd $(PKG_DIR) && tar -czf ../../$(BUILD_DIR)/package.tgz --owner=0 --group=0 *
+
+	# Calculate extract size (KB)
+	$(eval EXTRACTSIZE := $(shell du -sk $(PKG_DIR) | cut -f1))
+
+	# Generate INFO file
+	@echo "Generating INFO..."
+	sh $(SPK_DIR)/INFO.sh "$(VERSION)" "$(EXTRACTSIZE)" > $(BUILD_DIR)/INFO
+
+	# Assemble SPK
+	@echo "Assembling SPK..."
+	@mkdir -p $(BUILD_DIR)/spk_staging
+	cp $(BUILD_DIR)/INFO $(BUILD_DIR)/spk_staging/INFO
+	cp $(BUILD_DIR)/package.tgz $(BUILD_DIR)/spk_staging/package.tgz
+	cp $(SPK_DIR)/PACKAGE_ICON.PNG $(BUILD_DIR)/spk_staging/PACKAGE_ICON.PNG
+	cp $(SPK_DIR)/PACKAGE_ICON_256.PNG $(BUILD_DIR)/spk_staging/PACKAGE_ICON_256.PNG
+	cp $(SPK_DIR)/Netbird.sc $(BUILD_DIR)/spk_staging/Netbird.sc
+	cp -r $(SPK_DIR)/scripts $(BUILD_DIR)/spk_staging/scripts
+	cp -r $(SPK_DIR)/conf $(BUILD_DIR)/spk_staging/conf
+	cp -r $(SPK_DIR)/WIZARD_UIFILES $(BUILD_DIR)/spk_staging/WIZARD_UIFILES
+
+	cd $(BUILD_DIR)/spk_staging && tar -cf ../../$(SPK_NAME) --owner=0 --group=0 *
+
+	@rm -rf $(BUILD_DIR)/spk_staging
+	@echo ""
+	@echo "SPK package built: $(SPK_NAME)"
+	@echo "  Version:  $(VERSION)"
+	@echo "  Arch:     $(ARCH)"
+	@echo "  Size:     $$(du -sh $(SPK_NAME) | cut -f1)"
+
 clean:
-	@echo "Cleaning build artifacts..."
-	@rm -rf $(BUILD_DIR) $(DIST_DIR)
+	rm -rf $(BUILD_DIR)
+	rm -f $(BIN_DIR)/netbird
+	rm -f $(SPK_DIR)/INFO
+	rm -f *.spk
 
-# Development helper: validate scripts
-validate:
-	@echo "Validating shell scripts..."
-	@for script in $(SCRIPTS); do \
-		echo "Checking $$script..."; \
-		bash -n $$script || exit 1; \
-	done
-	@echo "All scripts are valid!"
-
-# Development helper: show package structure
-show-structure:
-	@echo "Package structure:"
+help:
+	@echo "NetBird Synology DSM Package Builder"
 	@echo ""
-	@find . -type f -not -path './.git/*' -not -path './build/*' -not -path './dist/*' | sort
+	@echo "Targets:"
+	@echo "  download  - Download pre-built NetBird binary from GitHub releases"
+	@echo "  build     - Build NetBird from source (requires Go 1.23+)"
+	@echo "  package   - Assemble the SPK package (run download or build first)"
+	@echo "  clean     - Remove build artifacts"
+	@echo "  help      - Show this help"
+	@echo ""
+	@echo "Quick start:"
+	@echo "  make download && make package"
+	@echo ""
+	@echo "Variables:"
+	@echo "  NETBIRD_SRC  - Path to NetBird source (default: .)"
+	@echo "  VERSION      - Package version (default: from VERSION file)"

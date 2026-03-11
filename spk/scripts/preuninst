@@ -1,0 +1,8 @@
+#!/bin/sh
+
+# Gracefully disconnect NetBird before uninstall
+if [ -x "${SYNOPKG_PKGDEST}/bin/netbird" ]; then
+    "${SYNOPKG_PKGDEST}/bin/netbird" --daemon-addr "unix://${SYNOPKG_PKGVAR}/netbird.sock" down --config "${SYNOPKG_PKGVAR}/config.json" 2>/dev/null || true
+fi
+
+exit 0

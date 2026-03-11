@@ -1,23 +1,11 @@
 # Build artifacts
+*.spk
+spk/package/bin/netbird
+spk/INFO
+spk/package.tgz
 build/
 dist/
-*.spk
 
-# Temporary files
-*.tmp
-*.log
-*.bak
-*~
-
-# IDE files
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# OS files
+# OS
 .DS_Store
 Thumbs.db
-
-# Test files
-test/
