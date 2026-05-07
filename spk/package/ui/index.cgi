@@ -17,6 +17,10 @@ html_escape() {
     printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g'
 }
 
+NAS_HOSTNAME=$(hostname 2>/dev/null || uname -n 2>/dev/null)
+[ -z "${NAS_HOSTNAME}" ] && NAS_HOSTNAME="this device"
+NAS_HOSTNAME=$(html_escape "${NAS_HOSTNAME}")
+
 # Inline SVG icons (Lucide subset).
 ICON_GLOBE='<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>'
 ICON_PIN='<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg>'
@@ -136,7 +140,8 @@ cat <<EOF
 <head>
   <meta charset="utf-8">
   <meta http-equiv="refresh" content="10">
-  <title>NetBird</title>
+  <title>NetBird Client - ${NAS_HOSTNAME}</title>
+  <link rel="icon" type="image/svg+xml" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 31 23"><path d="M21.46 0.52c-3.65 0.33-5.46 2.43-6.15 3.49L4.66 22.47h12.86L30.19 0.52H21.46z" fill="%23F68330"/><path d="M17.53 22.47L0 3.89s19.82-5.33 21.75 11.28l-4.22 7.3z" fill="%23F68330"/><path d="M14.92 4.71L9.55 14.02l7.97 8.45 4.22-7.32C21.07 9.45 18.29 6.33 14.92 4.7" fill="%23F05252"/></svg>'>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
     :root {
