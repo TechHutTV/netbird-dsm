@@ -9,7 +9,6 @@ PID_FILE="${PKGVAR}/netbird.pid"
 LOG_FILE="${PKGVAR}/netbird.log"
 CONFIG_FILE="${PKGVAR}/config.json"
 SOCKET_FILE="${PKGVAR}/netbird.sock"
-SETTINGS_FILE="${PKGVAR}/wizard_settings"
 DAEMON_ADDR="unix://${SOCKET_FILE}"
 
 # NetBird bundles wireguard-go, so kernel WireGuard is never needed.
@@ -30,8 +29,8 @@ start_daemon() {
     # Ensure var directory is writable
     mkdir -p "${PKGVAR}"
 
-    # Ensure binary is executable
-    chmod +x "${PKGDEST}/bin/netbird" 2>/dev/null
+    # Ensure binary and CLI wrapper are executable
+    chmod +x "${PKGDEST}/bin/netbird.bin" "${PKGDEST}/bin/netbird" 2>/dev/null
 
     ensure_tun_created
 
@@ -43,7 +42,7 @@ start_daemon() {
 
     echo "$(date) Starting ${SERVICE_NAME}..." >>"${LOG_FILE}"
 
-    nohup "${PKGDEST}/bin/netbird" service run \
+    nohup "${PKGDEST}/bin/netbird.bin" service run \
         --config "${CONFIG_FILE}" \
         --log-file "${LOG_FILE}" \
         --log-level info \
@@ -113,33 +112,13 @@ ensure_tun_created() {
     fi
 }
 
-apply_wizard_settings() {
-    if [ -f "${SETTINGS_FILE}" ]; then
-        . "${SETTINGS_FILE}"
-        sleep 3
-
-        UP_ARGS="--config ${CONFIG_FILE}"
-        if [ -n "${SETUP_KEY}" ]; then
-            UP_ARGS="${UP_ARGS} --setup-key ${SETUP_KEY}"
-        fi
-        if [ -n "${MANAGEMENT_URL}" ]; then
-            UP_ARGS="${UP_ARGS} --management-url ${MANAGEMENT_URL}"
-        fi
-
-        "${PKGDEST}/bin/netbird" --daemon-addr "${DAEMON_ADDR}" up ${UP_ARGS} >>"${LOG_FILE}" 2>&1
-        rm -f "${SETTINGS_FILE}"
-    fi
-}
-
 case "$1" in
 start)
     if daemon_status; then
         exit 0
     fi
     start_daemon
-    RC=$?
-    apply_wizard_settings &
-    exit ${RC}
+    exit $?
     ;;
 stop)
     if daemon_status; then

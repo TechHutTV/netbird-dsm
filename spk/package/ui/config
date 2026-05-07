@@ -1,12 +1,13 @@
 {
   ".url": {
-    "SYNO.SDS.Netbird": {
+    "com.netbird.netbird": {
       "type": "url",
       "title": "NetBird",
-      "desc": "NetBird Client Status",
-      "icon": "PACKAGE_ICON_256.PNG",
-      "url": "/webman/3rdparty/netbird/index.cgi/",
-      "allUsers": true
+      "desc": "NetBird VPN connection status",
+      "icon": "images/icon_{0}.png",
+      "url": "/webman/3rdparty/netbird/index.cgi",
+      "allUsers": false,
+      "grantPrivilege": "local"
     }
   }
 }

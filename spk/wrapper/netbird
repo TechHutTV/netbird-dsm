@@ -1,0 +1,26 @@
+#!/bin/sh
+# NetBird CLI wrapper.
+#
+# The daemon listens on a package-owned socket (the "package" user can't write
+# to /var/run/), so the CLI needs NB_DAEMON_ADDR pointed at the right place.
+# This wrapper sets the daemon socket and HOME, then execs the real binary at
+# netbird.bin. The usr-local-linker symlinks this script into
+# /usr/local/bin/netbird so it's what users invoke from the shell.
+#
+# NB_CONFIG is intentionally NOT exported here: in NetBird 0.70+ it's a
+# daemon-only setting (start-stop-status passes --config at launch), and
+# exporting it makes `netbird up` print a deprecation warning.
+
+PKGVAR="/var/packages/netbird/var"
+PKGDEST="/var/packages/netbird/target"
+
+export NB_DAEMON_ADDR="${NB_DAEMON_ADDR:-unix://${PKGVAR}/netbird.sock}"
+
+# Force HOME to the package var dir (don't inherit the invoking user's HOME).
+# On Synology, the SSH user's HOME is typically /var/services/homes/<user>,
+# which may not exist; the profile manager then prints a benign EEXIST warning
+# while walking the path. Pinning HOME here keeps profile state with the
+# package and silences the warning.
+export HOME="${PKGVAR}"
+
+exec "${PKGDEST}/bin/netbird.bin" "$@"

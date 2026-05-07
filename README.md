@@ -1,6 +1,6 @@
 # NetBird Synology DSM Package
 
-A Synology DSM 7.0+ package (.spk) for the [NetBird](https://netbird.io/) VPN client. Provides full DSM integration: daemon lifecycle, firewall rules, CLI symlink, log rotation, and a basic web UI.
+A Synology DSM 7.0+ package (.spk) for the [NetBird](https://netbird.io/) VPN client. Provides DSM integration for daemon lifecycle, firewall rules, CLI symlink, log rotation, and a read-only status page in DSM's AppPortal. **Configuration is CLI-only** — after installing, SSH into the NAS and use the `netbird` command to connect.
 
 **Target architecture:** x86_64 (Intel/AMD — Plus series and above)
 
@@ -32,54 +32,57 @@ make package
 1. Open **Package Center** on your Synology DSM
 2. Go to **Settings > General > Trust Level** and select **Any publisher**
 3. Go to **Manual Install** and upload the `.spk` file
-4. The install wizard will prompt you for:
-   - **Setup Key** — from your NetBird dashboard (required)
-   - **Management URL** — defaults to `https://api.netbird.io:443` (change for self-hosted)
-5. The package will start automatically and connect using your setup key
+4. The package will install and start the daemon. It will not be connected yet.
+5. SSH into the NAS and connect via CLI (see below).
 
-> **Note:** This package runs as root, which is required for sideloaded packages that need network administration privileges (TUN device, routes, firewall). Packages distributed through the official Synology Package Center can use fine-grained capabilities instead, but sideloaded `.spk` files do not support this.
+> **Note:** This package runs as the unprivileged `netbird` user using NetBird's userspace networking (netstack mode), so no kernel TUN device or root access is required. The "Any publisher" trust level is needed because sideloaded `.spk` files aren't signed by Synology — it has nothing to do with privileges.
 
-## Configuration
+## Configuration (CLI only)
 
-### Via DSM Web UI
-
-Click the **NetBird** icon in the DSM desktop to open the status page. From there you can:
-- View connection status, NetBird IP, and connected peers
-- Enter a new **setup key** and **management URL** to connect
-- **Disconnect** from the network
-
-### Via SSH (CLI)
-
-The CLI is available at `/usr/local/bin/netbird` (symlinked automatically).
+The DSM AppPortal page is read-only — there's no install wizard and no in-browser controls for connecting, disconnecting, or changing settings. SSH into the NAS and use the `netbird` CLI, which is symlinked to `/usr/local/bin/netbird`.
 
 ```bash
 # Connect using a setup key
-netbird up --setup-key YOUR_SETUP_KEY
+sudo netbird up --setup-key YOUR_SETUP_KEY
 
 # Connect to a self-hosted management server
-netbird up --setup-key YOUR_KEY --management-url https://your-server:443
+sudo netbird up --setup-key YOUR_KEY --management-url https://your-server:443
 
 # Check status
-netbird status
+sudo netbird status
 
 # Disconnect
-netbird down
+sudo netbird down
 ```
 
 ### Upgrades
 
-When upgrading the package, the wizard will optionally let you update your setup key and management URL. Leave the fields blank to keep your current configuration.
+Upgrading the package preserves your existing configuration — the daemon restarts and reconnects automatically using the keys it already has. No reconfiguration needed.
+
+## Status Page (DSM AppPortal)
+
+After install the package registers a NetBird entry in DSM's **Main Menu** that opens a read-only status page. By default it's restricted to DSM administrators — to grant access to other users go to **Control Panel → Application Privileges → NetBird** and add the desired users or groups.
+
+The page shows:
+
+- **Header line** — colored status dot + the connection state (`Connected` / `Not Configured` / `Disconnected`) and FQDN when enrolled
+- **Information card** — Domain Name, NetBird IP, Peers Connected, Relays, Exit Node, Agent Version, Profile (sourced from `netbird status`)
+- **Recent Activity** — collapsible tail of the daemon log with INFO/WARN/ERROR colorization
+- **Open Docs** — links to the NetBird Synology install guide
+- **Open Dashboard** — opens the management dashboard for this peer (uses `AdminURL` from `config.json`, so self-hosted deployments link to their own panel)
+
+The page auto-refreshes every 10 seconds. It's strictly read-only — install/connect/disconnect still happens via the CLI.
 
 ## Architecture
 
 ### How It Works
 
 - NetBird runs as a daemon managed by DSM's Package Center (start/stop/status)
-- Uses bundled **wireguard-go** for WireGuard tunnels (no kernel module needed)
-- Attempts to load the **TUN kernel module** for best performance
-- Falls back to **userspace routing** if TUN is unavailable
+- Uses bundled **wireguard-go** in **netstack mode** — fully userspace networking, no kernel WireGuard or TUN device required
+- The start script still tries to load the TUN module so the route table can be reused if available; otherwise `NB_FORCE_USERSPACE_ROUTER=true` is set automatically
 - Firewall rules are registered with DSM automatically (port 51820/udp)
 - Log rotation is handled by DSM's syslog system
+- Status page is served by DSM's web framework via the `dsmuidir` resource — DSM handles auth, sessions, and TLS
 
 ### DSM Integration
 
@@ -89,19 +92,22 @@ When upgrading the package, the wizard will optionally let you update your setup
 | Firewall rules | `Netbird.sc` port config via `port-config` resource |
 | CLI access | `/usr/local/bin/netbird` via `usr-local-linker` resource |
 | Log rotation | `logrotate.conf` via `syslog-config` resource |
-| Web UI | CGI status/settings page in DSM desktop |
-| Install wizard | Setup key and management URL prompted on install |
-| Privileges | Runs as root (required for sideloaded packages) |
+| Status page | `ui/index.cgi` via `dsmuidir` (DSM AppPortal, admin-only) |
+| Privileges | Runs as unprivileged `netbird` package user (userspace networking, no root) |
 
 ## File Locations
 
 | File | Path on DSM |
 |------|-------------|
-| Binary | `/var/packages/netbird/target/bin/netbird` |
+| Binary | `/var/packages/netbird/target/bin/netbird.bin` |
+| CLI wrapper | `/var/packages/netbird/target/bin/netbird` (sets `NB_DAEMON_ADDR`, execs the binary) |
+| CLI symlink | `/usr/local/bin/netbird` → wrapper |
+| Status page CGI | `/var/packages/netbird/target/ui/index.cgi` |
+| AppPortal URL | `https://<nas>:5001/webman/3rdparty/netbird/index.cgi` (behind DSM auth) |
 | Config | `/var/packages/netbird/var/config.json` |
+| Daemon socket | `/var/packages/netbird/var/netbird.sock` |
 | Log | `/var/packages/netbird/var/netbird.log` |
 | PID file | `/var/packages/netbird/var/netbird.pid` |
-| CLI symlink | `/usr/local/bin/netbird` |
 
 ## Troubleshooting
 
@@ -124,17 +130,30 @@ lsmod | grep tun
 sudo modprobe tun
 ```
 
-### "Requires root privileges" on install
+### Install blocked by trust level
 
-This package must run as root for network administration (TUN device, routes). Go to **Package Center > Settings > General > Trust Level** and select **Any publisher**, then retry the install.
+Sideloaded packages aren't signed by Synology. Go to **Package Center > Settings > General > Trust Level** and select **Any publisher**, then retry the install.
 
 ### Permission denied
 
-The package runs as root to manage network interfaces. If you still see permission errors, try restarting the package from Package Center.
+The package runs as the unprivileged `netbird` user, and all writable state lives under `/var/packages/netbird/var`. If you see permission errors, restart the package from Package Center.
 
 ### Firewall blocking connections
 
 Ensure port **51820/udp** is allowed in DSM's firewall. The package registers this port automatically, but manual firewall rules may override it.
+
+### Start fresh (clean reset)
+
+To wipe all NetBird state (keys, peer config, profile data) and re-enroll the device, stop the package, clear the var directory, then start it again:
+
+```bash
+sudo synopkg stop netbird
+sudo rm -rf /var/packages/netbird/var/*
+sudo synopkg start netbird
+sudo netbird up --setup-key YOUR_SETUP_KEY
+```
+
+All NetBird state lives under `/var/packages/netbird/var` — nothing escapes to `/etc` or other system locations, so this is a complete reset.
 
 ## SPK Structure
 
@@ -144,9 +163,6 @@ netbird-x86_64-<version>.spk
 ├── PACKAGE_ICON.PNG        # 64x64 icon
 ├── PACKAGE_ICON_256.PNG    # 256x256 icon
 ├── Netbird.sc              # Firewall/port config
-├── WIZARD_UIFILES/
-│   ├── install_uifile      # Install wizard (setup key, management URL)
-│   └── upgrade_uifile      # Upgrade wizard (optional reconfigure)
 ├── conf/
 │   ├── privilege           # Run-as-root config for sideloading
 │   └── resource            # Resource workers (linker, ports, logs)
@@ -159,14 +175,16 @@ netbird-x86_64-<version>.spk
 │   ├── preupgrade          # Pre-upgrade (runs netbird down)
 │   └── postupgrade         # Post-upgrade
 └── package.tgz             # Inner tarball
-    ├── bin/netbird         # NetBird binary
+    ├── bin/
+    │   ├── netbird         # CLI wrapper (symlinked to /usr/local/bin/netbird)
+    │   └── netbird.bin     # NetBird binary
     ├── conf/
     │   ├── Netbird.sc      # Port config
     │   └── logrotate.conf  # Log rotation
-    └── ui/
-        ├── config          # DSM desktop app config
-        ├── index.cgi       # CGI status page
-        └── PACKAGE_ICON_256.PNG
+    └── ui/                 # DSM AppPortal status page (admin-only)
+        ├── config          # AppPortal manifest (allUsers:false, grantPrivilege:local)
+        ├── index.cgi       # Read-only status page (shell CGI)
+        └── images/         # Multi-size launcher icons (16, 24, 32, 48, 64, 72, 96, 256 px)
 ```
 
 ## Development

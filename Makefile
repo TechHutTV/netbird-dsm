@@ -20,6 +20,7 @@ SPK_DIR := spk
 PKG_DIR := $(SPK_DIR)/package
 BIN_DIR := $(PKG_DIR)/bin
 BUILD_DIR := build
+WRAPPER_SRC := $(SPK_DIR)/wrapper/netbird
 
 .PHONY: all build download package clean check-binary
 
@@ -31,9 +32,9 @@ download:
 	@mkdir -p $(BIN_DIR) $(BUILD_DIR)
 	curl -fSL "$(RELEASE_URL)" -o $(BUILD_DIR)/netbird.tar.gz
 	tar -xzf $(BUILD_DIR)/netbird.tar.gz -C $(BUILD_DIR)/
-	cp $(BUILD_DIR)/netbird $(BIN_DIR)/netbird
-	chmod +x $(BIN_DIR)/netbird
-	@echo "Binary downloaded to $(BIN_DIR)/netbird"
+	cp $(BUILD_DIR)/netbird $(BIN_DIR)/netbird.bin
+	chmod +x $(BIN_DIR)/netbird.bin
+	@echo "Binary downloaded to $(BIN_DIR)/netbird.bin"
 
 # Build NetBird from source (requires Go 1.23+ and NetBird source)
 build:
@@ -41,18 +42,23 @@ build:
 	@mkdir -p $(BIN_DIR)
 	cd $(NETBIRD_SRC) && $(GOFLAGS) go build \
 		-ldflags "-s -w -X github.com/netbirdio/netbird/version.version=$(VERSION)" \
-		-o $(abspath $(BIN_DIR))/netbird \
+		-o $(abspath $(BIN_DIR))/netbird.bin \
 		./client/
-	@echo "Binary built at $(BIN_DIR)/netbird"
+	@echo "Binary built at $(BIN_DIR)/netbird.bin"
 
 # Verify binary exists before packaging
 check-binary:
-	@test -f $(BIN_DIR)/netbird || { echo "Error: $(BIN_DIR)/netbird not found. Run 'make download' or 'make build' first."; exit 1; }
+	@test -f $(BIN_DIR)/netbird.bin || { echo "Error: $(BIN_DIR)/netbird.bin not found. Run 'make download' or 'make build' first."; exit 1; }
 
 # Build the SPK package
 package: check-binary
 	@echo "Building SPK package..."
 	@mkdir -p $(BUILD_DIR)
+
+	# Stage the CLI wrapper alongside the binary so usr-local-linker symlinks it
+	@echo "Staging CLI wrapper..."
+	cp $(WRAPPER_SRC) $(BIN_DIR)/netbird
+	chmod +x $(BIN_DIR)/netbird
 
 	# Create package.tgz from package/ contents
 	@echo "Creating package.tgz..."
@@ -75,7 +81,6 @@ package: check-binary
 	cp $(SPK_DIR)/Netbird.sc $(BUILD_DIR)/spk_staging/Netbird.sc
 	cp -r $(SPK_DIR)/scripts $(BUILD_DIR)/spk_staging/scripts
 	cp -r $(SPK_DIR)/conf $(BUILD_DIR)/spk_staging/conf
-	cp -r $(SPK_DIR)/WIZARD_UIFILES $(BUILD_DIR)/spk_staging/WIZARD_UIFILES
 
 	cd $(BUILD_DIR)/spk_staging && tar -cf ../../$(SPK_NAME) --owner=0 --group=0 *
 
@@ -88,7 +93,7 @@ package: check-binary
 
 clean:
 	rm -rf $(BUILD_DIR)
-	rm -f $(BIN_DIR)/netbird
+	rm -f $(BIN_DIR)/netbird $(BIN_DIR)/netbird.bin
 	rm -f $(SPK_DIR)/INFO
 	rm -f *.spk
 

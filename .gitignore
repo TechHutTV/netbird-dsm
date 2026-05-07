@@ -1,10 +1,14 @@
 # Build artifacts
 *.spk
 spk/package/bin/netbird
+spk/package/bin/netbird.bin
 spk/INFO
 spk/package.tgz
 build/
 dist/
+
+# Local UI preview (not part of the package)
+preview.html
 
 # OS
 .DS_Store
