@@ -1,13 +1,12 @@
 # NetBird Synology DSM Package Builder
 # Usage:
-#   make download && make package   # Download pre-built binary and build SPK
-#   make build && make package      # Build from source and build SPK
-#   make clean                      # Remove build artifacts
+#   make download package VERSION=0.70.5                          # x86_64
+#   make download package VERSION=0.70.5 SYNOLOGY_ARCH=aarch64    # aarch64
+#   make build   package VERSION=0.70.5 NETBIRD_SRC=/path/to/src  # build from source
+#   make clean                                                    # remove artifacts
 
-VERSION := $(shell cat VERSION)
-
-# Architecture (defaults: x86_64 / amd64). Override SYNOLOGY_ARCH and NETBIRD_ARCH
-# is auto-derived; override either explicitly if needed.
+# Architecture (defaults: x86_64 / amd64). NETBIRD_ARCH is auto-derived from
+# SYNOLOGY_ARCH; override either explicitly if needed.
 SYNOLOGY_ARCH ?= x86_64
 ifeq ($(SYNOLOGY_ARCH),aarch64)
 NETBIRD_ARCH ?= arm64
@@ -31,12 +30,20 @@ BIN_DIR := $(PKG_DIR)/bin
 BUILD_DIR := build
 WRAPPER_SRC := $(SPK_DIR)/wrapper/netbird
 
-.PHONY: all build download package clean check-binary
+.PHONY: all build download package clean check-binary check-version
 
 all: package
 
+# Verify VERSION is set before targets that need it
+check-version:
+	@test -n "$(VERSION)" || { \
+		echo "ERROR: VERSION is required."; \
+		echo "Example: make download package VERSION=0.70.5"; \
+		exit 1; \
+	}
+
 # Download pre-built NetBird binary from GitHub releases
-download:
+download: check-version
 	@echo "Downloading NetBird v$(VERSION) for linux/$(NETBIRD_ARCH)..."
 	@mkdir -p $(BIN_DIR) $(BUILD_DIR)
 	curl -fSL "$(RELEASE_URL)" -o $(BUILD_DIR)/netbird.tar.gz
@@ -46,7 +53,7 @@ download:
 	@echo "Binary downloaded to $(BIN_DIR)/netbird.bin"
 
 # Build NetBird from source (requires Go 1.23+ and NetBird source)
-build:
+build: check-version
 	@echo "Building NetBird v$(VERSION) from source..."
 	@mkdir -p $(BIN_DIR)
 	cd $(NETBIRD_SRC) && $(GOFLAGS) go build \
@@ -60,7 +67,7 @@ check-binary:
 	@test -f $(BIN_DIR)/netbird.bin || { echo "Error: $(BIN_DIR)/netbird.bin not found. Run 'make download' or 'make build' first."; exit 1; }
 
 # Build the SPK package
-package: check-binary
+package: check-version check-binary
 	@echo "Building SPK package..."
 	@mkdir -p $(BUILD_DIR)
 
@@ -117,10 +124,10 @@ help:
 	@echo "  help      - Show this help"
 	@echo ""
 	@echo "Quick start:"
-	@echo "  make download && make package"
+	@echo "  make download package VERSION=0.70.5"
 	@echo ""
 	@echo "Variables:"
-	@echo "  NETBIRD_SRC    - Path to NetBird source (default: .)"
-	@echo "  VERSION        - Package version (default: from VERSION file)"
+	@echo "  VERSION        - NetBird upstream version (REQUIRED, e.g. 0.70.5)"
 	@echo "  SYNOLOGY_ARCH  - Synology arch token (default: x86_64; e.g. aarch64)"
-	@echo "  NETBIRD_ARCH   - NetBird arch token (default: amd64; e.g. arm64)"
+	@echo "  NETBIRD_ARCH   - NetBird arch token (auto from SYNOLOGY_ARCH; amd64/arm64)"
+	@echo "  NETBIRD_SRC    - Path to NetBird source for 'make build' (default: .)"

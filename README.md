@@ -16,12 +16,14 @@ A Synology DSM 7.0+ package (.spk) for the [NetBird](https://netbird.io/) VPN cl
 
 ## Quick Start (Pre-built Binary)
 
+Substitute `<version>` with a NetBird release tag (without the leading `v`) — see [NetBird releases](https://github.com/netbirdio/netbird/releases).
+
 ```bash
 # x86_64 (Intel/AMD — default)
-make download package
+make download package VERSION=<version>
 
 # aarch64 (ARM64 Synology models)
-make download package SYNOLOGY_ARCH=aarch64
+make download package VERSION=<version> SYNOLOGY_ARCH=aarch64
 ```
 
 This produces `netbird_<version>_synology_<amd64|arm64>.spk` in the repo root.
@@ -32,10 +34,10 @@ This produces `netbird_<version>_synology_<amd64|arm64>.spk` in the repo root.
 git clone https://github.com/netbirdio/netbird.git /path/to/netbird
 
 # x86_64
-make build package NETBIRD_SRC=/path/to/netbird
+make build package VERSION=<version> NETBIRD_SRC=/path/to/netbird
 
 # aarch64
-make build package NETBIRD_SRC=/path/to/netbird SYNOLOGY_ARCH=aarch64
+make build package VERSION=<version> NETBIRD_SRC=/path/to/netbird SYNOLOGY_ARCH=aarch64
 ```
 
 ## Installing on Synology
@@ -218,15 +220,15 @@ netbird_<version>_synology_<amd64|arm64>.spk
 Edit files in `spk/` and rebuild:
 ```bash
 make clean
-make download package                          # x86_64 (default)
-make download package SYNOLOGY_ARCH=aarch64    # aarch64
+make download package VERSION=<version>                          # x86_64
+make download package VERSION=<version> SYNOLOGY_ARCH=aarch64    # aarch64
 ```
 
-To change the version, edit the `VERSION` file. Build variables:
+Build variables:
 
 | Variable        | Default          | Notes                                                       |
 |-----------------|------------------|-------------------------------------------------------------|
-| `VERSION`       | from `VERSION`   | NetBird upstream version                                    |
+| `VERSION`       | _required_       | NetBird upstream version (e.g. `0.70.5`)                    |
 | `SYNOLOGY_ARCH` | `x86_64`         | Synology arch token written into INFO. Also accepts `aarch64`. |
 | `NETBIRD_ARCH`  | auto from above  | NetBird release arch (`amd64`/`arm64`). Override only if needed. |
 | `NETBIRD_SRC`   | `.`              | Path to NetBird source (only for `make build`)              |

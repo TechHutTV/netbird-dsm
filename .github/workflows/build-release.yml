@@ -61,8 +61,10 @@ jobs:
 
       - name: Download NetBird binary (upstream version)
         run: |
-          echo "${{ steps.ver.outputs.upstream }}" > VERSION
-          make download SYNOLOGY_ARCH=${{ matrix.synology_arch }} NETBIRD_ARCH=${{ matrix.netbird_arch }}
+          make download \
+            VERSION=${{ steps.ver.outputs.upstream }} \
+            SYNOLOGY_ARCH=${{ matrix.synology_arch }} \
+            NETBIRD_ARCH=${{ matrix.netbird_arch }}
 
       - name: Build SPK (package version)
         run: |
