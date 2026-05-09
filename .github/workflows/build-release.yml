@@ -159,15 +159,13 @@ jobs:
           icon_url="${BASE_URL%/}/icon-256.png"
           source_url="${BASE_URL%/}/index.json"
 
-          # Build one entry per SPK
+          # Build one entry per SPK; read each SPK's INFO arch as the source of truth
           : > /tmp/entries.jsonl
           for spk_file in netbird_${PKG_VERSION}_synology_*.spk; do
-            netbird_arch=$(echo "$spk_file" | sed -E 's/^netbird_.*_synology_(.*)\.spk$/\1/')
-            case "$netbird_arch" in
-              amd64) syno_arch="x86_64" ;;
-              arm64) syno_arch="aarch64" ;;
-              *) echo "Unknown arch in $spk_file: $netbird_arch"; exit 1 ;;
-            esac
+            arch=$(tar -xOf "$spk_file" INFO 2>/dev/null | sed -nE 's/^arch="(.*)"$/\1/p')
+            if [ -z "$arch" ]; then
+              echo "Could not extract arch from $spk_file"; exit 1
+            fi
             size=$(stat -c%s "$spk_file")
             md5=$(md5sum  "$spk_file" | awk '{print $1}')
             sha256=$(sha256sum "$spk_file" | awk '{print $1}')
@@ -180,7 +178,7 @@ jobs:
               --arg maintainer_url "$maintainer_url" \
               --arg link "$link" \
               --arg icon_url "$icon_url" \
-              --arg arch "$syno_arch" \
+              --arg arch "$arch" \
               --arg md5 "$md5" \
               --arg sha256 "$sha256" \
               --argjson size "$size" \

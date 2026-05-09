@@ -1,10 +1,31 @@
 #!/bin/sh
 # Generates the INFO file for the NetBird SPK package.
-# Usage: ./INFO.sh <version> <extractsize> [arch]
+# Usage: ./INFO.sh <version> <extractsize> [arch_family]
+#
+# arch_family is one of: x86_64, aarch64
+# It expands into the full Synology chip-family list per
+# https://help.synology.com/developer-guide/appendix/platarchs.html
+# DSM matches against specific chip tokens (apollolake, geminilake, etc.)
+# at install time, so the family list must be enumerated.
 
-VERSION="${1:?Usage: INFO.sh <version> <extractsize_kb> [arch]}"
+VERSION="${1:?Usage: INFO.sh <version> <extractsize_kb> [arch_family]}"
 EXTRACTSIZE="${2:-0}"
-ARCH="${3:-x86_64}"
+ARCH_FAMILY="${3:-x86_64}"
+
+case "$ARCH_FAMILY" in
+  x86_64)
+    ARCH="apollolake avoton braswell broadwell broadwellnk broadwellntb broadwellntbap bromolow cedarview coffeelake denverton geminilake grantley kvmx64 purley skylaked v1000"
+    ;;
+  aarch64)
+    # Synology calls this family "armv8" and it covers these chip tokens.
+    ARCH="armada37xx rtd1296 rtd1619 rtd1619b"
+    ;;
+  *)
+    # Allow passing through an explicit value for testing.
+    ARCH="$ARCH_FAMILY"
+    ;;
+esac
+
 TIMESTAMP=$(date '+%Y%m%d-%H%M%S')
 
 cat <<EOF
