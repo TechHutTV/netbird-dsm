@@ -35,7 +35,7 @@ jobs:
       upstream: ${{ steps.ver.outputs.upstream }}
       tag: ${{ steps.ver.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Resolve versions
         id: ver
@@ -74,7 +74,7 @@ jobs:
             NETBIRD_ARCH=${{ matrix.netbird_arch }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: netbird_${{ steps.ver.outputs.pkg }}_synology_${{ matrix.netbird_arch }}
           path: netbird_${{ steps.ver.outputs.pkg }}_synology_${{ matrix.netbird_arch }}.spk
@@ -87,10 +87,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download all SPK artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: netbird_*_synology_*
           merge-multiple: true
@@ -126,14 +126,14 @@ jobs:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Configure Pages
         id: pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
 
       - name: Download all SPK artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: netbird_*_synology_*
           merge-multiple: true
@@ -255,10 +255,10 @@ jobs:
           HTML
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: _site
 
       - name: Deploy to Pages
         id: deploy
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
