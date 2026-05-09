@@ -29,6 +29,21 @@ make package
 
 ## Installing on Synology
 
+### Option A — Package Source (recommended, gets automatic updates)
+
+1. Open **Package Center** on your Synology DSM
+2. Go to **Settings > General > Trust Level** and select **Any publisher**
+3. Go to **Settings > Package Sources**, click **Add**, give it any name, and set Location to:
+   ```
+   https://techhuttv.github.io/netbird-dsm/index.json
+   ```
+4. Open the **Community** tab — NetBird will appear there. Click **Install**.
+5. SSH into the NAS and connect via CLI (see below).
+
+DSM will offer updates automatically when a new version is published.
+
+### Option B — Manual install (single .spk file)
+
 1. Open **Package Center** on your Synology DSM
 2. Go to **Settings > General > Trust Level** and select **Any publisher**
 3. Go to **Manual Install** and upload the `.spk` file
