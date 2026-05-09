@@ -78,7 +78,7 @@ jobs:
             gh release upload "$tag" "$file" --clobber
           else
             gh release create "$tag" \
-              --title "$tag_synology" \
+              --title "${tag}_synology" \
               --notes "Built from netbirdio/netbird v${{ steps.ver.outputs.upstream }}" \
               "$file"
           fi
