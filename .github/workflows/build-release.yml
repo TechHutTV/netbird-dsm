@@ -1,0 +1,80 @@
+name: Build SPK Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      netbird_version:
+        description: "Upstream NetBird version to package (leave blank for latest)"
+        required: false
+        default: ""
+      build_suffix:
+        description: "Build suffix for the SPK version (e.g. 1, dsm.1). Leave blank to use upstream version unchanged."
+        required: false
+        default: ""
+      publish_release:
+        description: "Create a GitHub Release with the SPK attached"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve versions
+        id: ver
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.netbird_version }}" ]; then
+            upstream="${{ inputs.netbird_version }}"
+          else
+            upstream=$(curl -fsSL https://api.github.com/repos/netbirdio/netbird/releases/latest \
+                       | jq -r '.tag_name' | sed 's/^v//')
+          fi
+          suffix="${{ inputs.build_suffix }}"
+          if [ -n "$suffix" ]; then
+            pkg="${upstream}-${suffix}"
+          else
+            pkg="$upstream"
+          fi
+          echo "upstream=$upstream" >> "$GITHUB_OUTPUT"
+          echo "pkg=$pkg"           >> "$GITHUB_OUTPUT"
+          echo "tag=v$pkg"          >> "$GITHUB_OUTPUT"
+          echo "Upstream NetBird: v$upstream"
+          echo "Package version:  $pkg"
+
+      - name: Download NetBird binary (upstream version)
+        run: |
+          echo "${{ steps.ver.outputs.upstream }}" > VERSION
+          make download
+
+      - name: Build SPK (package version)
+        run: make package VERSION=${{ steps.ver.outputs.pkg }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: netbird-x86_64-${{ steps.ver.outputs.pkg }}
+          path: netbird-x86_64-${{ steps.ver.outputs.pkg }}.spk
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: ${{ inputs.publish_release }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${{ steps.ver.outputs.tag }}"
+          file="netbird-x86_64-${{ steps.ver.outputs.pkg }}.spk"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$file" --clobber
+          else
+            gh release create "$tag" \
+              --title "NetBird DSM $tag" \
+              --notes "Built from netbirdio/netbird v${{ steps.ver.outputs.upstream }}" \
+              "$file"
+          fi
