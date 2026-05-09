@@ -2,29 +2,40 @@
 
 A Synology DSM 7.0+ package (.spk) for the [NetBird](https://netbird.io/) VPN client. Provides DSM integration for daemon lifecycle, firewall rules, CLI symlink, log rotation, and a read-only status page in DSM's AppPortal. **Configuration is CLI-only** — after installing, SSH into the NAS and use the `netbird` command to connect.
 
-**Target architecture:** x86_64 (Intel/AMD — Plus series and above)
+**Supported architectures:** `x86_64` (Intel/AMD — Plus series and above) and `aarch64` (64-bit ARM Synologies, e.g. DS220j-class and newer Realtek/Marvell ARM models).
+
+> ### ⚠️ Testing / beta fork
+>
+> This repository is a **testing fork** used to validate the build, packaging, and update-delivery pipeline before any of it lands in an official NetBird-maintained channel. The Package Source URL below points at this fork's GitHub Pages deployment. See [Testing & Validation](#testing--validation) below for what's been verified, what hasn't, and how to report issues.
 
 ## Prerequisites
 
-- A Synology NAS running **DSM 7.0** or later (x86_64)
+- A Synology NAS running **DSM 7.0** or later (x86_64 or aarch64)
 - `curl`, `tar`, `make` (for building the package)
 - Go 1.23+ (only if building from source)
 
 ## Quick Start (Pre-built Binary)
 
 ```bash
-make download    # Download NetBird binary from GitHub releases
-make package     # Build the .spk package
+# x86_64 (Intel/AMD — default)
+make download package
+
+# aarch64 (ARM64 Synology models)
+make download package SYNOLOGY_ARCH=aarch64
 ```
 
-This produces `netbird_<version>_synology_amd64.spk` in the repo root.
+This produces `netbird_<version>_synology_<amd64|arm64>.spk` in the repo root.
 
 ## Building from Source
 
 ```bash
 git clone https://github.com/netbirdio/netbird.git /path/to/netbird
-make build NETBIRD_SRC=/path/to/netbird
-make package
+
+# x86_64
+make build package NETBIRD_SRC=/path/to/netbird
+
+# aarch64
+make build package NETBIRD_SRC=/path/to/netbird SYNOLOGY_ARCH=aarch64
 ```
 
 ## Installing on Synology
@@ -173,7 +184,7 @@ All NetBird state lives under `/var/packages/netbird/var` — nothing escapes to
 ## SPK Structure
 
 ```
-netbird_<version>_synology_amd64.spk
+netbird_<version>_synology_<amd64|arm64>.spk
 ├── INFO                    # Package metadata
 ├── PACKAGE_ICON.PNG        # 64x64 icon
 ├── PACKAGE_ICON_256.PNG    # 256x256 icon
@@ -207,11 +218,43 @@ netbird_<version>_synology_amd64.spk
 Edit files in `spk/` and rebuild:
 ```bash
 make clean
-make download   # or: make build NETBIRD_SRC=/path/to/netbird
-make package
+make download package                          # x86_64 (default)
+make download package SYNOLOGY_ARCH=aarch64    # aarch64
 ```
 
-To change the version, edit the `VERSION` file.
+To change the version, edit the `VERSION` file. Build variables:
+
+| Variable        | Default          | Notes                                                       |
+|-----------------|------------------|-------------------------------------------------------------|
+| `VERSION`       | from `VERSION`   | NetBird upstream version                                    |
+| `SYNOLOGY_ARCH` | `x86_64`         | Synology arch token written into INFO. Also accepts `aarch64`. |
+| `NETBIRD_ARCH`  | auto from above  | NetBird release arch (`amd64`/`arm64`). Override only if needed. |
+| `NETBIRD_SRC`   | `.`              | Path to NetBird source (only for `make build`)              |
+
+## Testing & Validation
+
+This is a **testing / beta fork**, not the official NetBird-maintained DSM channel. It exists to validate the build, packaging, and update-delivery pipeline before any of it ships through `netbirdio/*`.
+
+### What's being validated
+
+- **Build pipeline** — single GitHub Actions run produces both `x86_64` and `aarch64` SPKs via a matrix workflow, attaches both to a Release, and refreshes the package source catalog on GitHub Pages.
+- **DSM Package Source flow** — confirming the static catalog at `https://techhuttv.github.io/netbird-dsm/index.json` is recognized by DSM and surfaces NetBird in **Package Center → Community** with working auto-update.
+- **Multi-arch catalog behavior** — a single `index.json` lists one entry per arch with the `arch` field set, relying on DSM to pick the matching one client-side.
+
+### Known untested areas
+
+- **aarch64 on real ARM Synology hardware.** The aarch64 SPK is structurally correct (DSM accepts and installs it), but the bundled NetBird binary has not been runtime-tested on an actual ARM Synology model. If you run on one, please file an issue with results.
+- **Multi-entry catalog filtering on DSM.** If DSM ends up showing duplicate NetBird entries instead of picking the matching arch, the fallback is to switch to per-arch URL paths (`/x86_64/index.json`, `/aarch64/index.json`).
+- **Update-detection latency.** DSM polls package sources on its own cadence; "should have updated by now" thresholds are still being characterized.
+
+### Reporting feedback
+
+File issues at <https://github.com/TechHutTV/netbird-dsm/issues>. Useful context to include:
+
+- DSM version (`Control Panel → Info Center`)
+- NAS model and CPU arch
+- Whether you installed via Package Source or Manual Install
+- Relevant log excerpt: `cat /var/packages/netbird/var/netbird.log`
 
 ## License
 

@@ -22,6 +22,14 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - synology_arch: x86_64
+            netbird_arch: amd64
+          - synology_arch: aarch64
+            netbird_arch: arm64
     outputs:
       pkg: ${{ steps.ver.outputs.pkg }}
       upstream: ${{ steps.ver.outputs.upstream }}
@@ -49,42 +57,63 @@ jobs:
           echo "pkg=$pkg"           >> "$GITHUB_OUTPUT"
           echo "tag=v$pkg"          >> "$GITHUB_OUTPUT"
           echo "Upstream NetBird: v$upstream"
-          echo "Package version:  $pkg"
+          echo "Package version:  $pkg (${{ matrix.synology_arch }})"
 
       - name: Download NetBird binary (upstream version)
         run: |
           echo "${{ steps.ver.outputs.upstream }}" > VERSION
-          make download
+          make download SYNOLOGY_ARCH=${{ matrix.synology_arch }} NETBIRD_ARCH=${{ matrix.netbird_arch }}
 
       - name: Build SPK (package version)
-        run: make package VERSION=${{ steps.ver.outputs.pkg }}
+        run: |
+          make package \
+            VERSION=${{ steps.ver.outputs.pkg }} \
+            SYNOLOGY_ARCH=${{ matrix.synology_arch }} \
+            NETBIRD_ARCH=${{ matrix.netbird_arch }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: netbird_${{ steps.ver.outputs.pkg }}_synology_amd64
-          path: netbird_${{ steps.ver.outputs.pkg }}_synology_amd64.spk
+          name: netbird_${{ steps.ver.outputs.pkg }}_synology_${{ matrix.netbird_arch }}
+          path: netbird_${{ steps.ver.outputs.pkg }}_synology_${{ matrix.netbird_arch }}.spk
           if-no-files-found: error
 
-      - name: Publish GitHub Release
-        if: ${{ inputs.publish_release }}
+  publish-release:
+    needs: build
+    if: ${{ inputs.publish_release }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all SPK artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: netbird_*_synology_*
+          merge-multiple: true
+
+      - name: Publish GitHub Release (all arches)
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.build.outputs.tag }}
+          UPSTREAM: ${{ needs.build.outputs.upstream }}
         run: |
           set -euo pipefail
-          tag="${{ steps.ver.outputs.tag }}"
-          file="netbird_${{ steps.ver.outputs.pkg }}_synology_amd64.spk"
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" "$file" --clobber
+          ls -la netbird_*_synology_*.spk
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            for f in netbird_*_synology_*.spk; do
+              gh release upload "$TAG" "$f" --clobber
+            done
           else
-            gh release create "$tag" \
-              --title "${tag}_synology" \
-              --notes "Built from netbirdio/netbird v${{ steps.ver.outputs.upstream }}" \
-              "$file"
+            gh release create "$TAG" \
+              --title "${TAG}_synology" \
+              --notes "Built from netbirdio/netbird v${UPSTREAM}" \
+              netbird_*_synology_*.spk
           fi
 
   deploy-catalog:
-    needs: build
+    needs: [build, publish-release]
     if: ${{ inputs.publish_release }}
     runs-on: ubuntu-latest
     permissions:
@@ -101,10 +130,11 @@ jobs:
         id: pages
         uses: actions/configure-pages@v5
 
-      - name: Download SPK artifact
+      - name: Download all SPK artifacts
         uses: actions/download-artifact@v4
         with:
-          name: netbird_${{ needs.build.outputs.pkg }}_synology_amd64
+          pattern: netbird_*_synology_*
+          merge-multiple: true
 
       - name: Build _site (catalog + landing page)
         env:
@@ -118,32 +148,41 @@ jobs:
           mkdir -p _site
           cp spk/PACKAGE_ICON_256.PNG _site/icon-256.png
 
-          spk_file="netbird_${PKG_VERSION}_synology_amd64.spk"
-          size=$(stat -c%s "$spk_file")
-          md5=$(md5sum  "$spk_file" | awk '{print $1}')
-          sha256=$(sha256sum "$spk_file" | awk '{print $1}')
-
+          # Shared metadata (same across arches)
           info=$(sh spk/INFO.sh "$PKG_VERSION" "0")
           desc=$(printf '%s\n' "$info" | sed -nE 's/^description="(.*)"$/\1/p')
           maintainer=$(printf '%s\n' "$info" | sed -nE 's/^maintainer="(.*)"$/\1/p')
           maintainer_url=$(printf '%s\n' "$info" | sed -nE 's/^maintainer_url="(.*)"$/\1/p')
 
-          link="https://github.com/${REPO}/releases/download/${TAG}/${spk_file}"
           icon_url="${BASE_URL%/}/icon-256.png"
           source_url="${BASE_URL%/}/index.json"
 
-          jq -n \
-            --arg version "$PKG_VERSION" \
-            --arg desc "$desc" \
-            --arg maintainer "$maintainer" \
-            --arg maintainer_url "$maintainer_url" \
-            --arg link "$link" \
-            --arg icon_url "$icon_url" \
-            --arg md5 "$md5" \
-            --arg sha256 "$sha256" \
-            --argjson size "$size" \
-            '{
-              packages: [{
+          # Build one entry per SPK
+          : > /tmp/entries.jsonl
+          for spk_file in netbird_${PKG_VERSION}_synology_*.spk; do
+            netbird_arch=$(echo "$spk_file" | sed -E 's/^netbird_.*_synology_(.*)\.spk$/\1/')
+            case "$netbird_arch" in
+              amd64) syno_arch="x86_64" ;;
+              arm64) syno_arch="aarch64" ;;
+              *) echo "Unknown arch in $spk_file: $netbird_arch"; exit 1 ;;
+            esac
+            size=$(stat -c%s "$spk_file")
+            md5=$(md5sum  "$spk_file" | awk '{print $1}')
+            sha256=$(sha256sum "$spk_file" | awk '{print $1}')
+            link="https://github.com/${REPO}/releases/download/${TAG}/${spk_file}"
+
+            jq -nc \
+              --arg version "$PKG_VERSION" \
+              --arg desc "$desc" \
+              --arg maintainer "$maintainer" \
+              --arg maintainer_url "$maintainer_url" \
+              --arg link "$link" \
+              --arg icon_url "$icon_url" \
+              --arg arch "$syno_arch" \
+              --arg md5 "$md5" \
+              --arg sha256 "$sha256" \
+              --argjson size "$size" \
+              '{
                 package: "netbird",
                 version: $version,
                 dname: "NetBird",
@@ -154,6 +193,7 @@ jobs:
                 distributor_url: $maintainer_url,
                 thumbnail: [$icon_url],
                 link: $link,
+                arch: $arch,
                 md5: $md5,
                 sha256: $sha256,
                 size: $size,
@@ -163,8 +203,10 @@ jobs:
                 start: true,
                 thirdparty: true,
                 beta: false
-              }]
-            }' > _site/index.json
+              }' >> /tmp/entries.jsonl
+          done
+
+          jq -s '{packages: .}' /tmp/entries.jsonl > _site/index.json
 
           cat > _site/index.html <<HTML
           <!DOCTYPE html>

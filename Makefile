@@ -5,15 +5,24 @@
 #   make clean                      # Remove build artifacts
 
 VERSION := $(shell cat VERSION)
-ARCH := x86_64
-SPK_NAME := netbird_$(VERSION)_synology_amd64.spk
+
+# Architecture (defaults: x86_64 / amd64). Override SYNOLOGY_ARCH and NETBIRD_ARCH
+# is auto-derived; override either explicitly if needed.
+SYNOLOGY_ARCH ?= x86_64
+ifeq ($(SYNOLOGY_ARCH),aarch64)
+NETBIRD_ARCH ?= arm64
+else
+NETBIRD_ARCH ?= amd64
+endif
+
+SPK_NAME := netbird_$(VERSION)_synology_$(NETBIRD_ARCH).spk
 
 # For building from source (optional)
 NETBIRD_SRC ?= .
-GOFLAGS := CGO_ENABLED=0 GOOS=linux GOARCH=amd64
+GOFLAGS := CGO_ENABLED=0 GOOS=linux GOARCH=$(NETBIRD_ARCH)
 
 # GitHub release URL for downloading pre-built binary
-RELEASE_URL := https://github.com/netbirdio/netbird/releases/download/v$(VERSION)/netbird_$(VERSION)_linux_amd64.tar.gz
+RELEASE_URL := https://github.com/netbirdio/netbird/releases/download/v$(VERSION)/netbird_$(VERSION)_linux_$(NETBIRD_ARCH).tar.gz
 
 # Directories
 SPK_DIR := spk
@@ -28,7 +37,7 @@ all: package
 
 # Download pre-built NetBird binary from GitHub releases
 download:
-	@echo "Downloading NetBird v$(VERSION) for linux/amd64..."
+	@echo "Downloading NetBird v$(VERSION) for linux/$(NETBIRD_ARCH)..."
 	@mkdir -p $(BIN_DIR) $(BUILD_DIR)
 	curl -fSL "$(RELEASE_URL)" -o $(BUILD_DIR)/netbird.tar.gz
 	tar -xzf $(BUILD_DIR)/netbird.tar.gz -C $(BUILD_DIR)/
@@ -69,7 +78,7 @@ package: check-binary
 
 	# Generate INFO file
 	@echo "Generating INFO..."
-	sh $(SPK_DIR)/INFO.sh "$(VERSION)" "$(EXTRACTSIZE)" > $(BUILD_DIR)/INFO
+	sh $(SPK_DIR)/INFO.sh "$(VERSION)" "$(EXTRACTSIZE)" "$(SYNOLOGY_ARCH)" > $(BUILD_DIR)/INFO
 
 	# Assemble SPK
 	@echo "Assembling SPK..."
@@ -88,7 +97,7 @@ package: check-binary
 	@echo ""
 	@echo "SPK package built: $(SPK_NAME)"
 	@echo "  Version:  $(VERSION)"
-	@echo "  Arch:     $(ARCH)"
+	@echo "  Arch:     $(SYNOLOGY_ARCH) (netbird: $(NETBIRD_ARCH))"
 	@echo "  Size:     $$(du -sh $(SPK_NAME) | cut -f1)"
 
 clean:
@@ -111,5 +120,7 @@ help:
 	@echo "  make download && make package"
 	@echo ""
 	@echo "Variables:"
-	@echo "  NETBIRD_SRC  - Path to NetBird source (default: .)"
-	@echo "  VERSION      - Package version (default: from VERSION file)"
+	@echo "  NETBIRD_SRC    - Path to NetBird source (default: .)"
+	@echo "  VERSION        - Package version (default: from VERSION file)"
+	@echo "  SYNOLOGY_ARCH  - Synology arch token (default: x86_64; e.g. aarch64)"
+	@echo "  NETBIRD_ARCH   - NetBird arch token (default: amd64; e.g. arm64)"
