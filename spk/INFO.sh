@@ -14,10 +14,13 @@ ARCH_FAMILY="${3:-x86_64}"
 
 case "$ARCH_FAMILY" in
   x86_64)
-    ARCH="apollolake avoton braswell broadwell broadwellnk broadwellntb broadwellntbap bromolow cedarview coffeelake denverton geminilake grantley kvmx64 purley skylaked v1000"
+    # Cross-referenced with SynoCommunity's deployed packages, which include
+    # tokens missing from Synology's published table (e.g. r1000, r1000nk,
+    # v1000nk, epyc7002, broadwellnkv2, geminilakenk, icelaked).
+    ARCH="apollolake avoton braswell broadwell broadwellnk broadwellnkv2 broadwellntbap bromolow cedarview coffeelake denverton epyc7002 geminilake geminilakenk grantley icelaked kvmx64 purley r1000 r1000nk skylaked v1000 v1000nk"
     ;;
   aarch64)
-    # Synology calls this family "armv8" and it covers these chip tokens.
+    # Synology calls this family "armv8".
     ARCH="armada37xx rtd1296 rtd1619 rtd1619b"
     ;;
   *)
