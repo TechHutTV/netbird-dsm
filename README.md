@@ -44,12 +44,18 @@ make build package VERSION=<version> NETBIRD_SRC=/path/to/netbird SYNOLOGY_ARCH=
 
 ### Option A — Package Source (recommended, gets automatic updates)
 
+Pick the URL matching your NAS architecture:
+
+| NAS architecture | Package Source URL |
+|---|---|
+| **x86_64** (Intel / AMD — DS918+, DS920+, DS923+, DS1522+, RS series, etc.) | `https://techhuttv.github.io/netbird-dsm/x86_64/index.json` |
+| **aarch64** (64-bit ARM — DS220j, DS223j, DS124, DS418j, etc.) | `https://techhuttv.github.io/netbird-dsm/aarch64/index.json` |
+
+> Not sure which? SSH into the NAS and run `synogetkeyvalue /etc.defaults/synoinfo.conf unique` — output is `synology_<arch>_<model>`. Tokens like `apollolake`, `geminilake`, `v1000`, `r1000`, `denverton`, `purley` → x86_64. Tokens like `armada37xx`, `rtd1296`, `rtd1619b` → aarch64.
+
 1. Open **Package Center** on your Synology DSM
 2. Go to **Settings > General > Trust Level** and select **Any publisher**
-3. Go to **Settings > Package Sources**, click **Add**, give it any name, and set Location to:
-   ```
-   https://techhuttv.github.io/netbird-dsm/index.json
-   ```
+3. Go to **Settings > Package Sources**, click **Add**, give it any name, and paste the URL for your arch as the Location
 4. Open the **Community** tab — NetBird will appear there. Click **Install**.
 5. SSH into the NAS and connect via CLI (see below).
 
@@ -239,14 +245,13 @@ This is a **testing / beta fork**, not the official NetBird-maintained DSM chann
 
 ### What's being validated
 
-- **Build pipeline** — single GitHub Actions run produces both `x86_64` and `aarch64` SPKs via a matrix workflow, attaches both to a Release, and refreshes the package source catalog on GitHub Pages.
-- **DSM Package Source flow** — confirming the static catalog at `https://techhuttv.github.io/netbird-dsm/index.json` is recognized by DSM and surfaces NetBird in **Package Center → Community** with working auto-update.
-- **Multi-arch catalog behavior** — a single `index.json` lists one entry per arch with the `arch` field set, relying on DSM to pick the matching one client-side.
+- **Build pipeline** — single GitHub Actions run produces both `x86_64` and `aarch64` SPKs via a matrix workflow, attaches both to a Release, and refreshes the per-arch package source catalogs on GitHub Pages.
+- **DSM Package Source flow** — confirming the static catalogs at `/x86_64/index.json` and `/aarch64/index.json` are recognized by DSM and surface NetBird in **Package Center → Community** with working auto-update.
+- **Per-arch URL routing** — separate URLs per arch with single-entry catalogs avoids ambiguity in DSM's multi-entry handling. (An earlier iteration used one URL with two entries; DSM rejected it with "not supported on the platform" because of how it matches the catalog `arch` field.)
 
 ### Known untested areas
 
 - **aarch64 on real ARM Synology hardware.** The aarch64 SPK is structurally correct (DSM accepts and installs it), but the bundled NetBird binary has not been runtime-tested on an actual ARM Synology model. If you run on one, please file an issue with results.
-- **Multi-entry catalog filtering on DSM.** If DSM ends up showing duplicate NetBird entries instead of picking the matching arch, the fallback is to switch to per-arch URL paths (`/x86_64/index.json`, `/aarch64/index.json`).
 - **Update-detection latency.** DSM polls package sources on its own cadence; "should have updated by now" thresholds are still being characterized.
 
 ### Reporting feedback

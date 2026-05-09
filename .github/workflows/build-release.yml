@@ -157,56 +157,60 @@ jobs:
           maintainer_url=$(printf '%s\n' "$info" | sed -nE 's/^maintainer_url="(.*)"$/\1/p')
 
           icon_url="${BASE_URL%/}/icon-256.png"
-          source_url="${BASE_URL%/}/index.json"
+          x86_url="${BASE_URL%/}/x86_64/index.json"
+          arm_url="${BASE_URL%/}/aarch64/index.json"
 
-          # Build one entry per SPK; read each SPK's INFO arch as the source of truth
-          : > /tmp/entries.jsonl
+          # One catalog file per arch family (single-entry each). Naming the path
+          # by arch family lets users pick the URL matching their NAS, avoiding
+          # the ambiguity of two same-package entries in one catalog.
           for spk_file in netbird_${PKG_VERSION}_synology_*.spk; do
-            arch=$(tar -xOf "$spk_file" INFO 2>/dev/null | sed -nE 's/^arch="(.*)"$/\1/p')
-            if [ -z "$arch" ]; then
-              echo "Could not extract arch from $spk_file"; exit 1
-            fi
+            netbird_arch=$(echo "$spk_file" | sed -E 's/^netbird_.*_synology_(.*)\.spk$/\1/')
+            case "$netbird_arch" in
+              amd64) family="x86_64" ;;
+              arm64) family="aarch64" ;;
+              *) echo "Unknown arch in $spk_file: $netbird_arch"; exit 1 ;;
+            esac
+
             size=$(stat -c%s "$spk_file")
             md5=$(md5sum  "$spk_file" | awk '{print $1}')
             sha256=$(sha256sum "$spk_file" | awk '{print $1}')
             link="https://github.com/${REPO}/releases/download/${TAG}/${spk_file}"
 
-            jq -nc \
+            mkdir -p "_site/$family"
+            jq -n \
               --arg version "$PKG_VERSION" \
               --arg desc "$desc" \
               --arg maintainer "$maintainer" \
               --arg maintainer_url "$maintainer_url" \
               --arg link "$link" \
               --arg icon_url "$icon_url" \
-              --arg arch "$arch" \
               --arg md5 "$md5" \
               --arg sha256 "$sha256" \
               --argjson size "$size" \
               '{
-                package: "netbird",
-                version: $version,
-                dname: "NetBird",
-                desc: $desc,
-                maintainer: $maintainer,
-                maintainer_url: $maintainer_url,
-                distributor: $maintainer,
-                distributor_url: $maintainer_url,
-                thumbnail: [$icon_url],
-                link: $link,
-                arch: $arch,
-                md5: $md5,
-                sha256: $sha256,
-                size: $size,
-                qinst: true,
-                qstart: true,
-                qupgrade: true,
-                start: true,
-                thirdparty: true,
-                beta: false
-              }' >> /tmp/entries.jsonl
+                packages: [{
+                  package: "netbird",
+                  version: $version,
+                  dname: "NetBird",
+                  desc: $desc,
+                  maintainer: $maintainer,
+                  maintainer_url: $maintainer_url,
+                  distributor: $maintainer,
+                  distributor_url: $maintainer_url,
+                  thumbnail: [$icon_url],
+                  link: $link,
+                  md5: $md5,
+                  sha256: $sha256,
+                  size: $size,
+                  qinst: true,
+                  qstart: true,
+                  qupgrade: true,
+                  start: true,
+                  thirdparty: true,
+                  beta: false
+                }]
+              }' > "_site/$family/index.json"
           done
-
-          jq -s '{packages: .}' /tmp/entries.jsonl > _site/index.json
 
           cat > _site/index.html <<HTML
           <!DOCTYPE html>
@@ -220,31 +224,54 @@ jobs:
             h1 { display: flex; align-items: center; gap: 0.75rem; font-size: 1.6rem; }
             h1 img { width: 48px; height: 48px; }
             h2 { font-size: 1.05rem; margin-top: 2rem; }
-            code { background: #f6f8fa; padding: 0.1rem 0.3rem; border-radius: 6px; font-size: 0.9em; }
+            h3 { font-size: 0.95rem; margin: 1rem 0 0.4rem; color: #1f2328; }
+            code, pre { background: #f6f8fa; border-radius: 6px; }
+            code { padding: 0.1rem 0.3rem; font-size: 0.9em; }
+            pre { padding: 0.6rem 0.8rem; overflow-x: auto; font-size: 0.85rem; }
             .url-box input { width: 100%; padding: 0.55rem 0.75rem; font-family: ui-monospace, monospace; font-size: 0.9rem; border: 1px solid #d0d7de; border-radius: 6px; box-sizing: border-box; }
             ol li { margin: 0.35rem 0; }
+            ul li { margin: 0.2rem 0; }
             hr { border: 0; border-top: 1px solid #d0d7de; margin: 2rem 0; }
             footer { font-size: 0.85rem; color: #6e7781; }
+            details { margin-top: 0.75rem; }
+            summary { cursor: pointer; color: #0969da; font-size: 0.9rem; }
           </style>
           </head>
           <body>
           <h1><img src="icon-256.png" alt="">NetBird DSM Package Source</h1>
-          <p>Synology DSM 7.0+ package source for the <a href="https://netbird.io">NetBird</a> client. Add the URL below in <strong>Package Center &rarr; Settings &rarr; Package Sources</strong> to receive automatic updates.</p>
+          <p>Synology DSM 7.0+ package source for the <a href="https://netbird.io">NetBird</a> client. Add the URL matching your NAS architecture in <strong>Package Center &rarr; Settings &rarr; Package Sources</strong> to receive automatic updates.</p>
 
-          <h2>Package Source URL</h2>
-          <div class="url-box"><input type="text" value="$source_url" readonly onclick="this.select()"></div>
+          <h2>Package Source URLs</h2>
+
+          <h3>x86_64 (Intel / AMD)</h3>
+          <p>Models with Intel Celeron, Xeon, or AMD Ryzen CPUs &mdash; e.g. DS918+, DS920+, DS923+, DS1522+, RS series.</p>
+          <div class="url-box"><input type="text" value="$x86_url" readonly onclick="this.select()"></div>
+
+          <h3>aarch64 (64-bit ARM)</h3>
+          <p>Models with Realtek RTD or Marvell Armada ARM CPUs &mdash; e.g. DS220j, DS223j, DS124, DS418j.</p>
+          <div class="url-box"><input type="text" value="$arm_url" readonly onclick="this.select()"></div>
+
+          <details>
+          <summary>Not sure which architecture? Run this on your NAS via SSH</summary>
+          <pre>synogetkeyvalue /etc.defaults/synoinfo.conf unique</pre>
+          <p>Output looks like <code>synology_&lt;arch&gt;_&lt;model&gt;</code>. The middle token tells you which URL to use:</p>
+          <ul>
+            <li><strong>x86_64 URL</strong> if you see <code>apollolake</code>, <code>geminilake</code>, <code>v1000</code>, <code>r1000</code>, <code>denverton</code>, <code>broadwell*</code>, <code>purley</code>, <code>epyc7002</code>, etc.</li>
+            <li><strong>aarch64 URL</strong> if you see <code>armada37xx</code>, <code>rtd1296</code>, <code>rtd1619b</code>.</li>
+          </ul>
+          </details>
 
           <h2>Setup</h2>
           <ol>
             <li>Open <strong>Package Center</strong> on your Synology DSM.</li>
-            <li>Open <strong>Settings &rarr; Package Sources</strong>, click <strong>Add</strong>, give it any name, and paste the URL above as the Location.</li>
+            <li>Open <strong>Settings &rarr; Package Sources</strong>, click <strong>Add</strong>, give it any name, and paste the URL for your arch as the Location.</li>
             <li>Open <strong>Settings &rarr; General</strong> and set <strong>Trust Level</strong> to <strong>Any publisher</strong>.</li>
             <li>NetBird will appear under the <strong>Community</strong> tab in Package Center.</li>
           </ol>
 
           <h2>Latest Version</h2>
           <p><strong>v$PKG_VERSION</strong> &mdash; built from <a href="https://github.com/netbirdio/netbird/releases/tag/v$UPSTREAM_VERSION">netbird v$UPSTREAM_VERSION</a>.<br>
-          <a href="$link">Direct SPK download</a> &middot; <a href="https://github.com/$REPO/releases">All releases</a></p>
+          <a href="https://github.com/$REPO/releases">All releases</a></p>
 
           <hr>
           <footer>Source: <a href="https://github.com/$REPO">github.com/$REPO</a></footer>
