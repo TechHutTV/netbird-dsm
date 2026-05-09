@@ -58,8 +58,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: netbird-x86_64-${{ steps.ver.outputs.pkg }}
-          path: netbird-x86_64-${{ steps.ver.outputs.pkg }}.spk
+          name: netbird_${{ steps.ver.outputs.pkg }}_synology_amd64
+          path: netbird_${{ steps.ver.outputs.pkg }}_synology_amd64.spk
           if-no-files-found: error
 
       - name: Publish GitHub Release
@@ -69,7 +69,7 @@ jobs:
         run: |
           set -euo pipefail
           tag="${{ steps.ver.outputs.tag }}"
-          file="netbird-x86_64-${{ steps.ver.outputs.pkg }}.spk"
+          file="netbird_${{ steps.ver.outputs.pkg }}_synology_amd64.spk"
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "$file" --clobber
           else

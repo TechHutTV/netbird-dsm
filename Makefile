@@ -6,7 +6,7 @@
 
 VERSION := $(shell cat VERSION)
 ARCH := x86_64
-SPK_NAME := netbird-$(ARCH)-$(VERSION).spk
+SPK_NAME := netbird_$(VERSION)_synology_amd64.spk
 
 # For building from source (optional)
 NETBIRD_SRC ?= .

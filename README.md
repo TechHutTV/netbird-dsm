@@ -17,7 +17,7 @@ make download    # Download NetBird binary from GitHub releases
 make package     # Build the .spk package
 ```
 
-This produces `netbird-x86_64-<version>.spk` in the repo root.
+This produces `netbird_<version>_synology_amd64.spk` in the repo root.
 
 ## Building from Source
 
@@ -158,7 +158,7 @@ All NetBird state lives under `/var/packages/netbird/var` — nothing escapes to
 ## SPK Structure
 
 ```
-netbird-x86_64-<version>.spk
+netbird_<version>_synology_amd64.spk
 ├── INFO                    # Package metadata
 ├── PACKAGE_ICON.PNG        # 64x64 icon
 ├── PACKAGE_ICON_256.PNG    # 256x256 icon
