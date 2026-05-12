@@ -1,7 +1,10 @@
 #!/bin/sh
 
-# Gracefully disconnect NetBird before upgrade
-if [ -x "${SYNOPKG_PKGDEST}/bin/netbird" ]; then
+# Gracefully disconnect NetBird before upgrade — but only if the daemon is
+# actually alive. Otherwise the CLI hangs on the connect timeout (~10s) before
+# giving up, which stretches upgrade for no benefit.
+PID_FILE="${SYNOPKG_PKGVAR}/netbird.pid"
+if [ -x "${SYNOPKG_PKGDEST}/bin/netbird" ] && [ -r "${PID_FILE}" ] && [ -d "/proc/$(cat "${PID_FILE}")" ]; then
     "${SYNOPKG_PKGDEST}/bin/netbird" --daemon-addr "unix://${SYNOPKG_PKGVAR}/netbird.sock" down --config "${SYNOPKG_PKGVAR}/config.json" 2>/dev/null || true
 fi
 
