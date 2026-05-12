@@ -235,10 +235,16 @@ jobs:
             footer { font-size: 0.85rem; color: #6e7781; }
             details { margin-top: 0.75rem; }
             summary { cursor: pointer; color: #0969da; font-size: 0.9rem; }
+            .notice { background: #fff8c5; border: 1px solid #d4a72c; border-left-width: 4px; border-radius: 6px; padding: 0.75rem 1rem; margin: 1rem 0 1.5rem; font-size: 0.9rem; }
+            .notice strong { display: block; margin-bottom: 0.25rem; }
           </style>
           </head>
           <body>
           <h1><img src="icon-256.png" alt="">NetBird DSM Package Source</h1>
+          <div class="notice">
+            <strong>&#9888;&#65039; Testing / beta fork</strong>
+            This site hosts a <strong>testing fork</strong> of the NetBird DSM package, used to validate the build, packaging, and update-delivery pipeline before any of it lands in an official NetBird-maintained channel. The Package Source URLs below point at this fork's GitHub Pages deployment. See <a href="https://github.com/$REPO#testing--validation">Testing &amp; Validation</a> in the repository README for what's been verified, what hasn't, and how to report issues.
+          </div>
           <p>Synology DSM 7.0+ package source for the <a href="https://netbird.io">NetBird</a> client. Add the URL matching your NAS architecture in <strong>Package Center &rarr; Settings &rarr; Package Sources</strong> to receive automatic updates.</p>
 
           <h2>Package Source URLs</h2>

@@ -1,0 +1,98 @@
+name: PR SPK Build
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'Makefile'
+      - 'spk/**'
+      - '.github/workflows/pr-build.yml'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-build-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  setup:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    outputs:
+      pkg: ${{ steps.ver.outputs.pkg }}
+      upstream: ${{ steps.ver.outputs.upstream }}
+    steps:
+      - name: Resolve versions
+        id: ver
+        run: |
+          set -euo pipefail
+          upstream=$(curl -fsSL https://api.github.com/repos/netbirdio/netbird/releases/latest \
+                     | jq -r '.tag_name' | sed 's/^v//')
+          # PR-build revision: 9000<PR_NUMBER> (e.g. PR #5 -> 90005).
+          # Valid integer revision per DSM's INFO spec, well above the
+          # small-integer range used for release suffixes (-1, -2, ...).
+          pkg="${upstream}-9000${{ github.event.number }}"
+          echo "upstream=$upstream" >> "$GITHUB_OUTPUT"
+          echo "pkg=$pkg" >> "$GITHUB_OUTPUT"
+          echo "Building $pkg (NetBird v$upstream)"
+
+  build:
+    needs: setup
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - synology_arch: x86_64
+            netbird_arch: amd64
+          - synology_arch: aarch64
+            netbird_arch: arm64
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download NetBird binary (upstream)
+        run: |
+          make download \
+            VERSION=${{ needs.setup.outputs.upstream }} \
+            SYNOLOGY_ARCH=${{ matrix.synology_arch }} \
+            NETBIRD_ARCH=${{ matrix.netbird_arch }}
+
+      - name: Build SPK (PR version)
+        run: |
+          make package \
+            VERSION=${{ needs.setup.outputs.pkg }} \
+            SYNOLOGY_ARCH=${{ matrix.synology_arch }} \
+            NETBIRD_ARCH=${{ matrix.netbird_arch }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: netbird_${{ needs.setup.outputs.pkg }}_synology_${{ matrix.netbird_arch }}
+          path: netbird_${{ needs.setup.outputs.pkg }}_synology_${{ matrix.netbird_arch }}.spk
+          if-no-files-found: error
+          retention-days: 14
+
+  comment:
+    needs: [setup, build]
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: pr-spk-build
+          message: |
+            ### SPK builds for this PR
+
+            Built from upstream NetBird `v${{ needs.setup.outputs.upstream }}` as package version `${{ needs.setup.outputs.pkg }}`.
+
+            **Download:** [Checks tab for this run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) → *PR SPK Build* → Artifacts:
+
+            - `netbird_${{ needs.setup.outputs.pkg }}_synology_amd64` — x86_64 (DS918+, DS920+, DS1821+, etc.)
+            - `netbird_${{ needs.setup.outputs.pkg }}_synology_arm64` — aarch64 (DS220j, DS418j, etc.)
+
+            Install via **Package Center → Manual Install**. PR builds use revision `9000${{ github.event.number }}` to keep them distinct from release versions; uninstall any prior PR build before installing a new one.
+
+            _Artifacts expire 14 days after the run._
