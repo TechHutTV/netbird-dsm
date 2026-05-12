@@ -269,6 +269,13 @@ jobs:
             <li>NetBird will appear under the <strong>Community</strong> tab in Package Center.</li>
           </ol>
 
+          <h2>Uninstall</h2>
+          <p>Stop the package before uninstalling &mdash; DSM can leave the package in a stuck state if the daemon is still running (or has crashed) at the time of removal.</p>
+          <ol>
+            <li>In <strong>Package Center</strong>, open <strong>NetBird &rarr; Action &rarr; Stop</strong> (or run <code>sudo synopkg stop netbird</code> via SSH).</li>
+            <li>Then click <strong>Action &rarr; Uninstall</strong>.</li>
+          </ol>
+
           <h2>Latest Version</h2>
           <p><strong>v$PKG_VERSION</strong> &mdash; built from <a href="https://github.com/netbirdio/netbird/releases/tag/v$UPSTREAM_VERSION">netbird v$UPSTREAM_VERSION</a>.<br>
           <a href="https://github.com/$REPO/releases">All releases</a></p>
