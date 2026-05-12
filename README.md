@@ -93,6 +93,18 @@ sudo netbird down
 
 Upgrading the package preserves your existing configuration — the daemon restarts and reconnects automatically using the keys it already has. No reconfiguration needed.
 
+### Uninstalling
+
+Stop the package before uninstalling. DSM can leave the package in a stuck state if the daemon is still running (or has crashed) at the time of removal.
+
+1. **Stop** the package first — in **Package Center → NetBird → Action → Stop**, or via SSH:
+   ```bash
+   sudo synopkg stop netbird
+   ```
+2. **Uninstall** — **Package Center → NetBird → Action → Uninstall**.
+
+DSM removes `/var/packages/netbird` (binary, config, keys, logs) on uninstall — nothing escapes that path, so no manual cleanup is needed.
+
 ## Status Page (DSM AppPortal)
 
 After install the package registers a NetBird entry in DSM's **Main Menu** that opens a read-only status page. By default it's restricted to DSM administrators — to grant access to other users go to **Control Panel → Application Privileges → NetBird** and add the desired users or groups.
