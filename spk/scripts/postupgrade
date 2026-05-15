@@ -4,8 +4,4 @@
 chmod +x "${SYNOPKG_PKGDEST}/bin/netbird.bin" "${SYNOPKG_PKGDEST}/bin/netbird"
 chmod +x "${SYNOPKG_PKGDEST}/ui/index.cgi"
 
-# File capabilities are tied to the inode — replacing the binary on upgrade
-# wipes them, so reapply.
-setcap cap_net_admin,cap_net_raw+ep "${SYNOPKG_PKGDEST}/bin/netbird.bin" 2>/dev/null || true
-
 exit 0

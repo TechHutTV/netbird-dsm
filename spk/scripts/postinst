@@ -5,19 +5,4 @@
 chmod +x "${SYNOPKG_PKGDEST}/bin/netbird.bin" "${SYNOPKG_PKGDEST}/bin/netbird"
 chmod +x "${SYNOPKG_PKGDEST}/ui/index.cgi"
 
-# Grant the daemon the networking capabilities it needs to create a kernel
-# TUN device and configure routes, so it can run as the unprivileged
-# `netbird` user instead of root (which would trigger DSM's "runs with root
-# privileges" install warning).
-setcap cap_net_admin,cap_net_raw+ep "${SYNOPKG_PKGDEST}/bin/netbird.bin" 2>/dev/null || true
-
-# Make sure /dev/net/tun exists and is openable by the netbird user. The
-# kernel re-creates this node on each boot via devtmpfs with default
-# (root-only) permissions, so this only sticks for the current boot — the
-# start script reapplies it on every start as a belt-and-braces.
-modprobe tun 2>/dev/null || true
-[ -d /dev/net ] || mkdir -m 755 /dev/net
-[ -c /dev/net/tun ] || mknod /dev/net/tun c 10 200 2>/dev/null
-chmod 0666 /dev/net/tun 2>/dev/null
-
 exit 0
