@@ -2,8 +2,11 @@
 
 SERVICE_NAME="netbird"
 
-PKGVAR="${SYNOPKG_PKGVAR}"
-PKGDEST="${SYNOPKG_PKGDEST}"
+# Default PKGVAR/PKGDEST so the script also works when invoked outside the
+# synopkg framework (e.g. a DSM Task Scheduler task running as root — see
+# the "Advanced: kernel TUN" section in the README).
+PKGVAR="${SYNOPKG_PKGVAR:-/var/packages/netbird/var}"
+PKGDEST="${SYNOPKG_PKGDEST:-/var/packages/netbird/target}"
 
 PID_FILE="${PKGVAR}/netbird.pid"
 LOG_FILE="${PKGVAR}/netbird.log"
@@ -14,16 +17,33 @@ DAEMON_ADDR="unix://${SOCKET_FILE}"
 # NetBird bundles wireguard-go, so kernel WireGuard is never needed.
 export NB_WG_KERNEL_DISABLED=true
 
-# Use netstack mode for full userspace networking (no TUN device needed).
-export NB_USE_NETSTACK_MODE=true
-
-# Redirect NetBird state/config directories to the package var directory.
-# Without this, NetBird tries to write to /var/lib/netbird/ and /var/run/
-# which the package user doesn't have permission for.
+# Keep all state inside the package var directory so uninstall is clean and
+# we never touch /var/lib/netbird or /var/run.
 export NB_STATE_DIR="${PKGVAR}"
 export NB_CONFIG="${CONFIG_FILE}"
 export NB_DAEMON_ADDR="${DAEMON_ADDR}"
 export HOME="${PKGVAR}"
+
+# Choose netstack vs kernel-TUN dynamically. DSM 7+ doesn't let unsigned
+# third-party packages run as root, and setcap isn't shipped — so when the
+# script is invoked by Package Center under the unprivileged `netbird` user
+# (the default), a kernel TUN is unreachable and we use netstack instead.
+# If the user opts into the "Advanced: kernel TUN" path documented in the
+# README (a DSM Task Scheduler task running this script as root), we try to
+# bring up /dev/net/tun and let the daemon use a real kernel interface so
+# the NetBird IP becomes routable on the host.
+if [ "$(id -u)" -eq 0 ]; then
+    if ! lsmod 2>/dev/null | grep -q "^tun "; then
+        modprobe tun 2>/dev/null || insmod /lib/modules/tun.ko 2>/dev/null || true
+    fi
+    if [ ! -c /dev/net/tun ]; then
+        [ -d /dev/net ] || mkdir -m 755 /dev/net 2>/dev/null
+        mknod /dev/net/tun c 10 200 2>/dev/null
+    fi
+fi
+if [ ! -c /dev/net/tun ] || [ ! -w /dev/net/tun ]; then
+    export NB_USE_NETSTACK_MODE=true
+fi
 
 start_daemon() {
     # Ensure var directory is writable
@@ -31,14 +51,6 @@ start_daemon() {
 
     # Ensure binary and CLI wrapper are executable
     chmod +x "${PKGDEST}/bin/netbird.bin" "${PKGDEST}/bin/netbird" 2>/dev/null
-
-    ensure_tun_created
-
-    # If TUN device is still not available, force userspace router mode
-    if [ ! -c /dev/net/tun ]; then
-        export NB_FORCE_USERSPACE_ROUTER=true
-        echo "$(date) TUN device not available, using userspace router" >>"${LOG_FILE}"
-    fi
 
     echo "$(date) Starting ${SERVICE_NAME}..." >>"${LOG_FILE}"
 
@@ -99,22 +111,6 @@ wait_for_status() {
         sleep 1
     done
     return 1
-}
-
-ensure_tun_created() {
-    # Try to load TUN kernel module
-    if ! lsmod 2>/dev/null | grep -q "^tun "; then
-        modprobe tun 2>/dev/null || insmod /lib/modules/tun.ko 2>/dev/null || true
-    fi
-
-    # Create /dev/net/tun if missing
-    if [ ! -c /dev/net/tun ]; then
-        if [ ! -d /dev/net ]; then
-            mkdir -m 755 /dev/net
-        fi
-        mknod /dev/net/tun c 10 200 2>/dev/null
-        chmod 0755 /dev/net/tun 2>/dev/null
-    fi
 }
 
 case "$1" in
