@@ -31,12 +31,14 @@ start_daemon() {
     ensure_tun_created
 
     # Prefer a real kernel TUN device so DSM services (sshd, web UI) are
-    # reachable on the peer's NetBird IP. Fall back to netstack only when
-    # /dev/net/tun truly cannot be brought up — in that mode the host is
+    # reachable on the peer's NetBird IP. The daemon runs as the `netbird`
+    # package user with CAP_NET_ADMIN granted via setcap in postinst, so it
+    # needs /dev/net/tun to be openable by that user. Fall back to netstack
+    # only when the device can't be opened — in netstack mode the host is
     # NOT reachable on its NetBird IP, only outbound peer traffic works.
-    if [ ! -c /dev/net/tun ]; then
+    if [ ! -c /dev/net/tun ] || [ ! -w /dev/net/tun ]; then
         export NB_USE_NETSTACK_MODE=true
-        echo "$(date) TUN device unavailable, falling back to netstack mode (host services will not be reachable on the NetBird IP)" >>"${LOG_FILE}"
+        echo "$(date) /dev/net/tun unavailable or not writable by $(id -un), falling back to netstack mode (host services will not be reachable on the NetBird IP)" >>"${LOG_FILE}"
     fi
 
     echo "$(date) Starting ${SERVICE_NAME}..." >>"${LOG_FILE}"
@@ -101,19 +103,21 @@ wait_for_status() {
 }
 
 ensure_tun_created() {
-    # Try to load TUN kernel module
+    # All of these will silently no-op when this script is running as the
+    # unprivileged `netbird` user (the package user from privilege.conf) —
+    # postinst already handled them with root. They only do real work when
+    # DSM happens to invoke this script as root, or as a recovery path if
+    # the device was wiped after postinst.
     if ! lsmod 2>/dev/null | grep -q "^tun "; then
         modprobe tun 2>/dev/null || insmod /lib/modules/tun.ko 2>/dev/null || true
     fi
-
-    # Create /dev/net/tun if missing
     if [ ! -c /dev/net/tun ]; then
-        if [ ! -d /dev/net ]; then
-            mkdir -m 755 /dev/net
-        fi
+        [ -d /dev/net ] || mkdir -m 755 /dev/net 2>/dev/null
         mknod /dev/net/tun c 10 200 2>/dev/null
-        chmod 0755 /dev/net/tun 2>/dev/null
     fi
+    # Make sure the netbird user can open it. Across reboots devtmpfs may
+    # recreate the node with default 0600 perms, so always try.
+    chmod 0666 /dev/net/tun 2>/dev/null
 }
 
 case "$1" in

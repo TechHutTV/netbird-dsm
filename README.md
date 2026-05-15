@@ -69,7 +69,7 @@ DSM will offer updates automatically when a new version is published.
 4. The package will install and start the daemon. It will not be connected yet.
 5. SSH into the NAS and connect via CLI (see below).
 
-> **Note:** This package runs the NetBird daemon as root so it can create a real kernel TUN device and bind the peer's NetBird IP — without that, DSM's `sshd` and web UI wouldn't be reachable on the NetBird IP. The "Any publisher" trust level is needed because sideloaded `.spk` files aren't signed by Synology — it has nothing to do with privileges.
+> **Note:** This package runs as the unprivileged `netbird` package user. `postinst` grants the binary `CAP_NET_ADMIN` and `CAP_NET_RAW` via `setcap` so it can create a real kernel TUN device — without that, DSM's `sshd` and web UI wouldn't be reachable on the NetBird IP, but the daemon still doesn't need root. The "Any publisher" trust level is needed because sideloaded `.spk` files aren't signed by Synology — it has nothing to do with privileges.
 
 ## Configuration (CLI only)
 
@@ -123,10 +123,11 @@ The page auto-refreshes every 10 seconds. It's strictly read-only — install/co
 
 ### How It Works
 
-- NetBird runs as a daemon managed by DSM's Package Center (start/stop/status)
-- Uses bundled **wireguard-go** with a real kernel **TUN** device so the peer's NetBird IP is a routable address on the NAS — `sshd` and DSM's web UI accept connections on it without any extra config
-- Kernel WireGuard isn't required (`NB_WG_KERNEL_DISABLED=true`); the start script loads the `tun` module and creates `/dev/net/tun` if missing
-- If `/dev/net/tun` can't be brought up at all, the script falls back to **netstack mode** automatically so the daemon still runs — in that mode host services are not reachable on the NetBird IP (outbound peer traffic still works)
+- NetBird runs as a daemon managed by DSM's Package Center (start/stop/status), under the unprivileged `netbird` package user
+- `postinst` grants the binary `CAP_NET_ADMIN` and `CAP_NET_RAW` via `setcap`, so the daemon can create a real kernel **TUN** device without being root — `sshd` and DSM's web UI accept connections on the peer's NetBird IP without any extra config
+- Kernel WireGuard isn't required (`NB_WG_KERNEL_DISABLED=true`); bundled **wireguard-go** drives the TUN device
+- `postinst` and the start script ensure `/dev/net/tun` exists and is openable by the `netbird` user (`chmod 0666`)
+- If `/dev/net/tun` can't be brought up or opened, the start script falls back to **netstack mode** automatically — in that mode host services are not reachable on the NetBird IP (outbound peer traffic still works)
 - Firewall rules are registered with DSM automatically (port 51820/udp)
 - Log rotation is handled by DSM's syslog system
 - Status page is served by DSM's web framework via the `dsmuidir` resource — DSM handles auth, sessions, and TLS
@@ -140,7 +141,7 @@ The page auto-refreshes every 10 seconds. It's strictly read-only — install/co
 | CLI access | `/usr/local/bin/netbird` via `usr-local-linker` resource |
 | Log rotation | `logrotate.conf` via `syslog-config` resource |
 | Status page | `ui/index.cgi` via `dsmuidir` (DSM AppPortal, admin-only) |
-| Privileges | Daemon runs as root so it can create a kernel TUN device and bind the peer's NetBird IP |
+| Privileges | Runs as unprivileged `netbird` user with `CAP_NET_ADMIN`/`CAP_NET_RAW` granted on the binary via `setcap` |
 
 ## File Locations
 
@@ -183,7 +184,7 @@ Sideloaded packages aren't signed by Synology. Go to **Package Center > Settings
 
 ### Permission denied
 
-All writable state lives under `/var/packages/netbird/var`. If you see permission errors, restart the package from Package Center.
+The package runs as the unprivileged `netbird` user, and all writable state lives under `/var/packages/netbird/var`. If you see permission errors, restart the package from Package Center.
 
 ### Firewall blocking connections
 
