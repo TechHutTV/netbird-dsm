@@ -1,7 +1,5 @@
 {
   "defaults": {
-    "run-as": "package"
-  },
-  "username": "netbird",
-  "groupname": "netbird"
+    "run-as": "system"
+  }
 }

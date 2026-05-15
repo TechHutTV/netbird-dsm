@@ -14,12 +14,8 @@ DAEMON_ADDR="unix://${SOCKET_FILE}"
 # NetBird bundles wireguard-go, so kernel WireGuard is never needed.
 export NB_WG_KERNEL_DISABLED=true
 
-# Use netstack mode for full userspace networking (no TUN device needed).
-export NB_USE_NETSTACK_MODE=true
-
-# Redirect NetBird state/config directories to the package var directory.
-# Without this, NetBird tries to write to /var/lib/netbird/ and /var/run/
-# which the package user doesn't have permission for.
+# Keep all state inside the package var directory so uninstall is clean and
+# we never touch /var/lib/netbird or /var/run.
 export NB_STATE_DIR="${PKGVAR}"
 export NB_CONFIG="${CONFIG_FILE}"
 export NB_DAEMON_ADDR="${DAEMON_ADDR}"
@@ -34,10 +30,13 @@ start_daemon() {
 
     ensure_tun_created
 
-    # If TUN device is still not available, force userspace router mode
+    # Prefer a real kernel TUN device so DSM services (sshd, web UI) are
+    # reachable on the peer's NetBird IP. Fall back to netstack only when
+    # /dev/net/tun truly cannot be brought up — in that mode the host is
+    # NOT reachable on its NetBird IP, only outbound peer traffic works.
     if [ ! -c /dev/net/tun ]; then
-        export NB_FORCE_USERSPACE_ROUTER=true
-        echo "$(date) TUN device not available, using userspace router" >>"${LOG_FILE}"
+        export NB_USE_NETSTACK_MODE=true
+        echo "$(date) TUN device unavailable, falling back to netstack mode (host services will not be reachable on the NetBird IP)" >>"${LOG_FILE}"
     fi
 
     echo "$(date) Starting ${SERVICE_NAME}..." >>"${LOG_FILE}"
