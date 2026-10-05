@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       netbird_version:
-        description: "Upstream NetBird version to package (leave blank for latest)"
+        description: "Upstream NetBird version to package (leave blank for the repository VERSION)"
         required: false
         default: ""
       build_suffix:
@@ -37,17 +37,22 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Test package scripts
+        run: make test
+
       - name: Resolve versions
         id: ver
+        env:
+          NETBIRD_VERSION: ${{ inputs.netbird_version }}
+          BUILD_SUFFIX: ${{ inputs.build_suffix }}
         run: |
           set -euo pipefail
-          if [ -n "${{ inputs.netbird_version }}" ]; then
-            upstream="${{ inputs.netbird_version }}"
+          if [ -n "$NETBIRD_VERSION" ]; then
+            upstream="$NETBIRD_VERSION"
           else
-            upstream=$(curl -fsSL https://api.github.com/repos/netbirdio/netbird/releases/latest \
-                       | jq -r '.tag_name' | sed 's/^v//')
+            upstream=$(cat VERSION)
           fi
-          suffix="${{ inputs.build_suffix }}"
+          suffix="$BUILD_SUFFIX"
           if [ -n "$suffix" ]; then
             pkg="${upstream}-${suffix}"
           else

@@ -1,9 +1,12 @@
 # NetBird Synology DSM Package Builder
 # Usage:
-#   make download package VERSION=0.70.5                          # x86_64
-#   make download package VERSION=0.70.5 SYNOLOGY_ARCH=aarch64    # aarch64
-#   make build   package VERSION=0.70.5 NETBIRD_SRC=/path/to/src  # build from source
-#   make clean                                                    # remove artifacts
+#   make download package                                      # x86_64, pinned VERSION
+#   make download package SYNOLOGY_ARCH=aarch64                 # aarch64
+#   make build package NETBIRD_SRC=/path/to/src                 # build from source
+#   make clean                                                 # remove artifacts
+
+# Shared default for local builds and CI. Override for packaging revisions.
+VERSION ?= $(shell cat VERSION)
 
 # Architecture (defaults: x86_64 / amd64). NETBIRD_ARCH is auto-derived from
 # SYNOLOGY_ARCH; override either explicitly if needed.
@@ -30,7 +33,7 @@ BIN_DIR := $(PKG_DIR)/bin
 BUILD_DIR := build
 WRAPPER_SRC := $(SPK_DIR)/wrapper/netbird
 
-.PHONY: all build download package clean check-binary check-version
+.PHONY: all build download package clean check-binary check-version test help
 
 all: package
 
@@ -38,7 +41,7 @@ all: package
 check-version:
 	@test -n "$(VERSION)" || { \
 		echo "ERROR: VERSION is required."; \
-		echo "Example: make download package VERSION=0.70.5"; \
+		echo "Example: make download package VERSION=0.80.0"; \
 		exit 1; \
 	}
 
@@ -52,7 +55,7 @@ download: check-version
 	chmod +x $(BIN_DIR)/netbird.bin
 	@echo "Binary downloaded to $(BIN_DIR)/netbird.bin"
 
-# Build NetBird from source (requires Go 1.23+ and NetBird source)
+# Build NetBird from source (requires the toolchain in upstream's go.mod)
 build: check-version
 	@echo "Building NetBird v$(VERSION) from source..."
 	@mkdir -p $(BIN_DIR)
@@ -113,21 +116,25 @@ clean:
 	rm -f $(SPK_DIR)/INFO
 	rm -f *.spk
 
+test:
+	python3 -B -m unittest discover -s tests -v
+
 help:
 	@echo "NetBird Synology DSM Package Builder"
 	@echo ""
 	@echo "Targets:"
 	@echo "  download  - Download pre-built NetBird binary from GitHub releases"
-	@echo "  build     - Build NetBird from source (requires Go 1.23+)"
+	@echo "  build     - Build NetBird from source (requires upstream's Go toolchain)"
 	@echo "  package   - Assemble the SPK package (run download or build first)"
 	@echo "  clean     - Remove build artifacts"
+	@echo "  test      - Check service networking configuration (requires Python 3)"
 	@echo "  help      - Show this help"
 	@echo ""
 	@echo "Quick start:"
-	@echo "  make download package VERSION=0.70.5"
+	@echo "  make download package"
 	@echo ""
 	@echo "Variables:"
-	@echo "  VERSION        - NetBird upstream version (REQUIRED, e.g. 0.70.5)"
+	@echo "  VERSION        - NetBird version (default: VERSION file; currently $(VERSION))"
 	@echo "  SYNOLOGY_ARCH  - Synology arch token (default: x86_64; e.g. aarch64)"
 	@echo "  NETBIRD_ARCH   - NetBird arch token (auto from SYNOLOGY_ARCH; amd64/arm64)"
 	@echo "  NETBIRD_SRC    - Path to NetBird source for 'make build' (default: .)"
