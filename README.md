@@ -178,6 +178,7 @@ The page shows:
 
 - **Header line** — colored status dot + the daemon's connection or login state and FQDN when connected
 - **Information card** — Domain Name, NetBird IP, Peers Connected, Connection Types, Relays Available, Exit Node, Agent Version, Profile (sourced from `netbird status --json`). Peer counts show connected / total; relay counts show available / total. Exit Node shows **Not reported**, because status JSON does not identify the selected exit node.
+- **Copy IP** — copies the NetBird IPv4 address without its CIDR suffix. If the browser blocks automatic copying, a selected address field is shown for manual copying.
 - **Recent Activity** — collapsible tail of the daemon log with INFO/WARN/ERROR colorization
 - **Open Docs** — links to the NetBird Synology install guide
 - **Open Dashboard** — automatically uses the connected management server's scheme, host, and port for self-hosted instances (for example, `https://netbird.example.com:443`). NetBird Cloud opens `https://app.netbird.io`. This assumes the self-hosted dashboard shares the management server's address; no extra flag is needed.

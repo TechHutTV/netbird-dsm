@@ -190,7 +190,10 @@ if [ "${SHOW_DASHBOARD}" = 1 ]; then
         </li>
         <li>
           <span class="label">${ICON_PIN}NetBird IP</span>
-          <span class="value">${NB_IP}</span>
+          <span class="ip-value">
+            <span id="netbird-ip" class="value">${NB_IP}</span>
+            <button id="copy-ip" class="btn btn-copy" type="button" disabled>Copy IP</button>
+          </span>
         </li>
         <li>
           <span class="label">${ICON_PEERS}Peers Connected</span>
@@ -333,6 +336,16 @@ cat <<EOF
       font-size: 0.84rem; text-align: right;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
+    .ip-value {
+      display: flex; align-items: center; justify-content: flex-end;
+      flex-wrap: wrap; gap: 0.5rem; min-width: 0;
+    }
+    .copy-feedback { margin: 0.75rem 0 0; font-size: 0.8125rem; color: var(--text-soft); }
+    .copy-feedback:empty { display: none; }
+    .copy-feedback input {
+      width: 11rem; margin-left: 0.5rem; padding: 0.25rem;
+      color: var(--text); background: var(--card); border: 1px solid var(--border-strong);
+    }
     details.log {
       margin-top: 1rem; background: var(--card);
       border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
@@ -371,6 +384,9 @@ cat <<EOF
       color: var(--text-soft); background: var(--card);
     }
     .btn:hover { background: #25282d; color: var(--text); }
+    .btn:focus-visible { outline: 2px solid var(--netbird); outline-offset: 2px; }
+    .btn:disabled { opacity: 0.5; cursor: default; }
+    .btn-copy { padding: 0.25rem 0.5rem; font-family: inherit; font-size: 0.75rem; flex-shrink: 0; }
     .btn .icon { width: 14px; height: 14px; color: currentColor; }
     .btn-primary { background: var(--netbird); border-color: var(--netbird); color: #fff; }
     .btn-primary:hover { background: #f46d1b; border-color: #f46d1b; color: #fff; }
@@ -393,6 +409,7 @@ $([ -n "${META}" ] && printf '      <span class="sep">·</span><span class="meta
     </div>
 $([ -n "${HINT}" ] && printf '    <p class="hint">%s</p>\n' "${HINT}")
 $([ -n "${CARD_ROWS}" ] && printf '    <div class="card">\n      <ul class="list">\n%s\n      </ul>\n    </div>\n' "${CARD_ROWS}")
+    <p id="copy-ip-feedback" class="copy-feedback" role="status"></p>
     <details class="log">
       <summary>
         <span class="left">${ICON_LOG}Recent Activity</span>
@@ -405,6 +422,57 @@ $([ -n "${CARD_ROWS}" ] && printf '    <div class="card">\n      <ul class="list
 $([ "${SHOW_DASHBOARD}" = "1" ] && printf '      <a class="btn btn-primary" href="%s" target="_blank" rel="noopener">%sOpen Dashboard</a>\n' "${DASHBOARD_URL}" "${ICON_EXTERNAL}")
     </div>
   </main>
+EOF
+cat <<'HTML'
+  <script>
+    (function () {
+      var button = document.getElementById('copy-ip');
+      if (!button) return;
+      var ip = document.getElementById('netbird-ip').textContent.trim().split('/')[0];
+      var octets = ip.split('.');
+      if (octets.length !== 4 || octets.some(function (part) {
+        return !/^\d{1,3}$/.test(part) || Number(part) > 255;
+      })) return;
+
+      var feedback = document.getElementById('copy-ip-feedback');
+      button.disabled = false;
+      button.addEventListener('click', async function () {
+        button.disabled = true;
+        feedback.textContent = '';
+        var copied = false;
+        try {
+          if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(ip);
+            copied = true;
+          }
+        } catch (error) { /* Try the HTTP-compatible fallback below. */ }
+
+        var field;
+        if (!copied) {
+          field = document.createElement('input');
+          field.type = 'text';
+          field.readOnly = true;
+          field.value = ip;
+          field.setAttribute('aria-label', 'NetBird IP address');
+          feedback.appendChild(field);
+          field.select();
+          try { copied = document.execCommand('copy'); } catch (error) { /* Offer manual copy. */ }
+        }
+
+        button.disabled = false;
+        if (copied) {
+          button.textContent = 'Copied!';
+          feedback.textContent = 'IP address copied.';
+          button.focus();
+        } else {
+          button.textContent = 'Copy IP';
+          feedback.insertBefore(document.createTextNode('Copy this address:'), field);
+          field.focus();
+          field.select();
+        }
+      });
+    })();
+  </script>
 </body>
 </html>
-EOF
+HTML
