@@ -1,6 +1,6 @@
 # NetBird Synology DSM Package
 
-A Synology DSM 7.0+ package (.spk) for the [NetBird](https://netbird.io/) VPN client. Provides DSM integration for daemon lifecycle, firewall rules, CLI symlink, log rotation, and a read-only status page in DSM's AppPortal. **Configuration is CLI-only** — after installing, SSH into the NAS and use the `netbird` command to connect.
+A Synology DSM 7.0+ package (.spk) for the [NetBird](https://netbird.io/) VPN client. Runs unprivileged with userspace local forwarding so permitted peers can reach NAS services through its NetBird IP. Provides DSM integration for daemon lifecycle, firewall rules, CLI symlink, log rotation, and a read-only status page in DSM's AppPortal. **Configuration is CLI-only** — after installing, SSH into the NAS and use the `netbird` command to connect.
 
 **Supported architectures:** `x86_64` (Intel/AMD — Plus series and above) and `aarch64` (64-bit ARM Synologies, e.g. DS220j-class and newer Realtek/Marvell ARM models).
 
@@ -12,32 +12,35 @@ A Synology DSM 7.0+ package (.spk) for the [NetBird](https://netbird.io/) VPN cl
 
 - A Synology NAS running **DSM 7.0** or later (x86_64 or aarch64)
 - `curl`, `tar`, `make` (for building the package)
-- Go 1.23+ (only if building from source)
+- The Go toolchain required by the selected NetBird release's `go.mod` (only if building from source)
 
 ## Quick Start (Pre-built Binary)
 
-Substitute `<version>` with a NetBird release tag (without the leading `v`) — see [NetBird releases](https://github.com/netbirdio/netbird/releases).
+Local builds and GitHub Actions default to **NetBird 0.80.0**, pinned in the [`VERSION`](VERSION) file. The native SPK uses the standard NetBird binary with the same networking settings as upstream's rootless image; Docker is not required.
 
 ```bash
 # x86_64 (Intel/AMD — default)
-make download package VERSION=<version>
+make download package
 
 # aarch64 (ARM64 Synology models)
-make download package VERSION=<version> SYNOLOGY_ARCH=aarch64
+make download package SYNOLOGY_ARCH=aarch64
 ```
 
 This produces `netbird_<version>_synology_<amd64|arm64>.spk` in the repo root.
+
+To explicitly select another [NetBird release](https://github.com/netbirdio/netbird/releases), pass `VERSION=<version>` without the leading `v`. The release workflow accepts an override too; leaving it blank uses the pinned version.
 
 ## Building from Source
 
 ```bash
 git clone https://github.com/netbirdio/netbird.git /path/to/netbird
+git -C /path/to/netbird checkout v0.80.0
 
 # x86_64
-make build package VERSION=<version> NETBIRD_SRC=/path/to/netbird
+make build package NETBIRD_SRC=/path/to/netbird
 
 # aarch64
-make build package VERSION=<version> NETBIRD_SRC=/path/to/netbird SYNOLOGY_ARCH=aarch64
+make build package NETBIRD_SRC=/path/to/netbird SYNOLOGY_ARCH=aarch64
 ```
 
 ## Installing on Synology
@@ -69,9 +72,9 @@ DSM will offer updates automatically when a new version is published.
 4. The package will install and start the daemon. It will not be connected yet.
 5. SSH into the NAS and connect via CLI (see below).
 
-> **Note:** This package runs as the unprivileged `netbird` package user with NetBird in **netstack mode** (userspace networking). DSM 7+ blocks third-party packages from running as root without a non-obvious user-flipped toggle, and `setcap` (which would let an unprivileged user create a kernel TUN) isn't available on most DSM builds — so a kernel TUN isn't reachable from this package. The "Any publisher" trust level is needed because sideloaded `.spk` files aren't signed by Synology; it has nothing to do with privileges.
+> **Rootless networking:** This package runs as the unprivileged `netbird` user in **netstack mode with local forwarding**. It does not need a kernel TUN device, file capabilities, or a root task for inbound access. NetBird forwards permitted connections on its overlay IP to services listening on the NAS's loopback address. DSM 7 restricts root privileges for unsigned packages; changing the publisher trust level does not grant root access.
 >
-> **Practical consequence:** the NAS is *not* directly reachable on its NetBird IP — `sshd`, DSM's web UI, and other host services bind to the kernel network stack, which doesn't see the netstack-only NetBird interface. See [Reaching the NAS over NetBird](#reaching-the-nas-over-netbird) below for workarounds.
+> DSM, SSH, and SMB access depend on service bindings and NetBird access policies. See [Reaching the NAS over NetBird](#reaching-the-nas-over-netbird) and the [hardware validation checklist](#rootless-networking-validation-on-dsm). Ordinary NAS applications do not gain automatic outbound access to the mesh in this mode.
 
 ## Configuration (CLI only)
 
@@ -93,23 +96,33 @@ sudo netbird down
 
 ### Reaching the NAS over NetBird
 
-Because the daemon runs in **netstack mode** (see install Note above), DSM's host services — `sshd`, the web UI on `:5000`/`:5001`, SMB, etc. — are *not* directly reachable on the peer's NetBird IP from another peer. Outbound traffic from the NAS through the mesh works fine; what doesn't work out of the box is connecting *to* the NAS on `100.x.x.x` from elsewhere on the mesh.
+The package enables `NB_USE_NETSTACK_MODE=true` and `NB_ENABLE_NETSTACK_LOCAL_FORWARDING=true`, matching [NetBird 0.80.0's rootless configuration](https://github.com/netbirdio/netbird/blob/v0.80.0/client/Dockerfile-rootless). Incoming connections to the NAS's NetBird IP are forwarded to the same port on `127.0.0.1`. For example, `100.x.x.x:5001` reaches `127.0.0.1:5001` on the NAS. The NAS does not need that NetBird address on a kernel interface.
 
-Three workarounds, in order of how seamless they are:
+1. Enroll the NAS using `sudo netbird up --setup-key YOUR_SETUP_KEY`.
+2. In the NetBird dashboard, allow the connecting peers to reach the NAS on the required ports. Typical TCP ports are **5001** for DSM HTTPS, **22** for DSM's SSH service, and **445** for SMB. Use your configured ports if different.
+3. Enable the corresponding services in DSM and make sure they listen on loopback or all interfaces. A service bound only to the NAS's LAN IP will not accept a connection forwarded to `127.0.0.1`.
+4. From another enrolled peer, use `https://100.x.x.x:5001`, `ssh user@100.x.x.x`, or `smb://100.x.x.x/share`, substituting the NAS's NetBird IP. You do not need to advertise a LAN route just to reach the NAS this way.
 
-- **Advertise the NAS's LAN as a network route, with the NAS itself as the routing peer.** This is the recommended option: the NAS sits in netstack mode, but it can still *forward* TCP and UDP from the mesh to anything on its LAN — including itself, at its LAN IP. In the NetBird dashboard mark this peer as a router for the NAS's subnet (e.g. `192.168.1.0/24`). Other mesh peers then reach DSM at `https://192.168.1.50:5001`, SSH at `ssh user@192.168.1.50`, SMB shares, etc. — all over the mesh. The NAS uses userspace sockets to relay traffic, so LAN hosts see connections coming from the NAS's LAN IP (effectively SNAT). Caveats: **ICMP doesn't work** (`ping 192.168.1.50` from a remote peer will time out — the daemon can't open raw sockets without `CAP_NET_RAW`), and non-TCP/UDP protocols (GRE, IPsec passthrough, mDNS/broadcast discovery) don't propagate. TCP/UDP-based services — which is everything you actually want from a NAS — work fine.
-- **NetBird's built-in SSH server.** Enable it in the management dashboard for this peer (or with `netbird up --enable-ssh`) and connect with `netbird ssh <peer-name>` from another NetBird-enrolled device. This rides the netstack interface and doesn't depend on host `sshd` at all. Good complement to the routing-peer option above when you specifically want SSH without LAN exposure.
-- **Outbound-tunnel / reverse-proxy fronting.** Out of scope for this package, but mentioned for completeness — anything that publishes DSM through a tunnel initiated *from the NAS* works fine.
+Local forwarding also makes loopback-only services reachable when a NetBird policy permits their ports. Limit policies to the source peers and destination ports you intend to allow. Host services see the forwarded connection as local, so their logs and source-IP rules do not identify the original peer. Binding to loopback or trusting local source addresses is not sufficient isolation for an allowed port; use NetBird policies to control peer access and require authentication in the service itself.
 
-If you specifically need the NAS to be reachable on its actual NetBird IP (`100.x.x.x`) rather than via LAN-route SNAT, see "Advanced: kernel TUN via Task Scheduler" below.
+The SSH example above uses DSM's existing SSH service and accounts. NetBird's optional built-in SSH server is separate; when enabled, it can handle port 22 itself and runs sessions as the unprivileged package user. Leave it disabled when you intend to forward port 22 to DSM SSH.
 
-### Advanced: kernel TUN via Task Scheduler (lets you reach the NAS on its NetBird IP)
+### Rootless limitations and direct P2P
 
-This package ships in netstack mode because DSM 7+ does not let unsigned third-party packages run as root (Synology's package signature, not a user-flippable toggle), and `setcap` isn't available on most DSM builds to grant an unprivileged daemon `CAP_NET_ADMIN`. The `start-stop-status` script auto-detects how it was invoked: when DSM's Package Center starts it under the unprivileged `netbird` user it stays in netstack mode, but when invoked **as root**, it brings up `/dev/net/tun` and the daemon uses a real kernel TUN — making the NetBird IP routable on the host (sshd, DSM web UI reachable on `100.x.x.x`).
+- **Inbound access:** local forwarding supports TCP and UDP services that accept connections on loopback. Responses to those connections travel back through NetBird.
+- **Outbound access:** ordinary NAS applications cannot initiate mesh connections transparently because the host has no NetBird interface or routes. Applications that support SOCKS5 can use NetBird's local proxy (normally `127.0.0.1:1080`). See [upstream rootless documentation](https://docs.netbird.io/get-started/install/docker#rootless-image).
+- **DNS:** rootless networking does not install NetBird DNS settings into DSM. Other peers can still use NetBird DNS to find the NAS; use IP addresses when isolating connectivity problems.
+- **LAN routing:** the NAS can act as a userspace routing peer for reachable LAN resources. Configure a NetBird resource/route and the required policies; local forwarding also permits access to the NAS's own LAN address. See [routing-peer self-access](https://docs.netbird.io/use-cases/remote-access/reach-services-on-the-routing-peer).
+- **Protocols:** this does not provide full layer-3 networking for host applications. Broadcast discovery and protocols requiring independent outbound connections need separate consideration. Test the actual service rather than using ping as the sole success criterion.
+- **Direct P2P:** netstack mode does not force relaying. NetBird still attempts direct connections; NAT and firewall conditions decide whether it needs a relay. Check `sudo netbird status --detail` to distinguish connection type from service reachability.
 
-The supported way to run the script as root is via DSM's **Task Scheduler**. Caveats up front:
+### Advanced: kernel TUN via Task Scheduler (system-wide outbound access)
 
-- You're managing daemon lifecycle outside Package Center. The package's GUI Start/Stop button will still work (and will fall back to netstack), but the kernel-TUN daemon needs to be (re)started by the scheduled task.
+Use this optional mode when NAS applications need transparent outbound mesh access or you need a host network interface instead of local forwarding. It is not required for the inbound access described above. When started **as root**, the service script attempts to prepare `/dev/net/tun` and use a real kernel TUN. It falls back to netstack with local forwarding if that device is unavailable. The log records the selected mode.
+
+DSM's **Task Scheduler** can run the script as root, with these limitations:
+
+- You're managing daemon lifecycle outside Package Center. Its unprivileged scripts may not be able to stop a root-owned daemon. Use the service script as root to stop it before upgrades, uninstalling, or switching modes.
 - Once the daemon has run as root, files under `/var/packages/netbird/var/` (config, keys, logs) end up owned by `root` — Package Center's later attempts to start it under `netbird` may fail with permission errors. If you revert to netstack-only, run `sudo chown -R netbird:netbird /var/packages/netbird/var`.
 - This isn't a Synology-supported configuration. Future DSM updates could change it.
 
@@ -124,14 +137,24 @@ Setup:
      /var/packages/netbird/scripts/start-stop-status start
      ```
 3. **Run the task once to start the daemon now** (right-click → Run, or reboot).
-4. Verify with `sudo netbird status` — `Interface type:` should now read `Native` (real TUN) instead of `Userspace`, and `ip -br addr` should show `wt0` holding `100.x.x.x/16`.
-5. From another peer, `ssh user@100.x.x.x` and `https://100.x.x.x:5001` should now work.
+4. Check the startup log for `kernel TUN` and use `ip addr show wt0` to verify a host interface with the NetBird IP. `Interface type: Userspace` alone does not distinguish netstack from userspace WireGuard using a real TUN; this package always disables kernel WireGuard.
+5. Test outbound access from a NAS application to another peer, subject to NetBird policies and DSM firewall rules.
 
-To revert to netstack-only: disable/delete the scheduled task, run `sudo chown -R netbird:netbird /var/packages/netbird/var`, and use Package Center to start the package normally.
+To return to the normal rootless package, disable/delete the scheduled task, then stop the root daemon **before** restoring ownership:
+
+```bash
+sudo /var/packages/netbird/scripts/start-stop-status stop
+sudo chown -R netbird:netbird /var/packages/netbird/var
+sudo synopkg start netbird
+```
 
 ### Upgrades
 
-Upgrading the package preserves your existing configuration — the daemon restarts and reconnects automatically using the keys it already has. No reconfiguration needed.
+Upgrading the package preserves your existing configuration — the daemon restarts and reconnects automatically using the keys it already has. No new enrollment is needed.
+
+**Before upgrading from an earlier netstack build, review every NetBird policy that grants access to this NAS.** Local forwarding becomes active on the next daemon start under those existing policies, including broad grants to all peers or all ports. Narrow the grants to the intended source peers and required destination ports before upgrading: allowed ports can now reach host services, including previously unreachable loopback-only listeners. Those services see a local connection, so any service that trusts localhost without authentication needs its own access controls before its port is allowed.
+
+If you used the root Task Scheduler workaround, follow the steps above to return daemon ownership to Package Center before upgrading.
 
 ### Uninstalling
 
@@ -147,7 +170,9 @@ DSM removes `/var/packages/netbird` (binary, config, keys, logs) on uninstall �
 
 ## Status Page (DSM AppPortal)
 
-After install the package registers a NetBird entry in DSM's **Main Menu** that opens a read-only status page. By default it's restricted to DSM administrators — to grant access to other users go to **Control Panel → Application Privileges → NetBird** and add the desired users or groups.
+After install the package registers a NetBird entry in DSM's **Main Menu** that opens a read-only status page. Sign in to DSM with an account in the **administrators** group, using the same hostname or IP address as the status page. The page uses your existing DSM session; it does not need a separate NetBird login.
+
+The CGI validates the DSM session and administrator membership before reading configuration, querying NetBird, or returning logs. Invalid or expired sessions receive a sign-in page (HTTP 401); authenticated non-administrators receive HTTP 403. Authentication or group-lookup failures deny access. **Application Privileges** controls the launcher, but granting launcher access does not grant non-administrators access to this page.
 
 The page shows:
 
@@ -165,12 +190,12 @@ The page auto-refreshes every 10 seconds. It's strictly read-only — install/co
 
 - NetBird runs as a daemon managed by DSM's Package Center (start/stop/status), as the unprivileged `netbird` package user (`privilege.conf: run-as: package`)
 - The daemon runs in **netstack mode** by default (`NB_USE_NETSTACK_MODE=true`) — fully userspace networking via bundled wireguard-go and a gVisor TCP/IP stack. No kernel TUN, no `CAP_NET_ADMIN`, no root.
-- This is a deliberate compromise: DSM 7+ doesn't let unsigned third-party packages run as root, and `setcap` (which would let an unprivileged daemon create a kernel TUN) isn't shipped on most DSM builds. Netstack works on every DSM 7 box out of the box.
-- The cost is host-reachability: services bound on the kernel network stack (sshd, DSM UI) don't see the netstack interface. See "[Reaching the NAS over NetBird](#reaching-the-nas-over-netbird)" for workarounds.
-- The `start-stop-status` script auto-detects how it was invoked: when run by Package Center under the `netbird` user → netstack; when run **as root** (via the optional DSM Task Scheduler setup in "[Advanced: kernel TUN](#advanced-kernel-tun-via-task-scheduler-lets-you-reach-the-nas-on-its-netbird-ip)") → bring up `/dev/net/tun` and use a real kernel TUN. Same SPK, two modes, user picks.
+- **Local forwarding** (`NB_ENABLE_NETSTACK_LOCAL_FORWARDING=true`) delivers permitted inbound connections on the NetBird IP to host loopback services. Access policies are enforced by NetBird's userspace filter.
+- The netstack startup environment also sets `NB_DISABLE_DNS=true` and `NB_ENABLE_CAPTURE=false`, following upstream's rootless image. Rootless mode does not configure DSM's host DNS or routes.
+- The `start-stop-status` script selects netstack for unprivileged starts even if `/dev/net/tun` is writable. An explicit **root** start can use a real TUN for system-wide outbound access; see [Advanced: kernel TUN](#advanced-kernel-tun-via-task-scheduler-system-wide-outbound-access). Network setup runs only when starting a new daemon.
 - Firewall rules are registered with DSM automatically (port 51820/udp)
 - Log rotation is handled by DSM's syslog system
-- Status page is served by DSM's web framework via the `dsmuidir` resource — DSM handles auth, sessions, and TLS
+- Status page is served by DSM's web framework via the `dsmuidir` resource. The CGI calls DSM's `authenticate.cgi` and checks administrator membership before accessing package data; responses disable caching and referrer disclosure.
 
 ### DSM Integration
 
@@ -180,8 +205,8 @@ The page auto-refreshes every 10 seconds. It's strictly read-only — install/co
 | Firewall rules | `Netbird.sc` port config via `port-config` resource |
 | CLI access | `/usr/local/bin/netbird` via `usr-local-linker` resource |
 | Log rotation | `logrotate.conf` via `syslog-config` resource |
-| Status page | `ui/index.cgi` via `dsmuidir` (DSM AppPortal, admin-only) |
-| Privileges | Daemon runs as unprivileged `netbird` user via `privilege.conf` (`run-as: package`); uses NetBird netstack mode (no kernel TUN, no root) |
+| Status page | `ui/index.cgi` via `dsmuidir` (DSM session and administrator checks enforced by the CGI) |
+| Privileges | Unprivileged `netbird` user via `conf/privilege` (`run-as: package`); netstack with local forwarding |
 
 ## File Locations
 
@@ -191,7 +216,7 @@ The page auto-refreshes every 10 seconds. It's strictly read-only — install/co
 | CLI wrapper | `/var/packages/netbird/target/bin/netbird` (sets `NB_DAEMON_ADDR`, execs the binary) |
 | CLI symlink | `/usr/local/bin/netbird` → wrapper |
 | Status page CGI | `/var/packages/netbird/target/ui/index.cgi` |
-| AppPortal URL | `https://<nas>:5001/webman/3rdparty/netbird/index.cgi` (behind DSM auth) |
+| AppPortal URL | `https://<nas>:5001/webman/3rdparty/netbird/index.cgi` |
 | Config | `/var/packages/netbird/var/config.json` |
 | Daemon socket | `/var/packages/netbird/var/netbird.sock` |
 | Log | `/var/packages/netbird/var/netbird.log` |
@@ -208,7 +233,15 @@ cat /var/packages/netbird/var/netbird.log
 
 ### `Interface type: Userspace` in `netbird status`
 
-That's expected — by default the daemon runs in netstack mode and reports a userspace interface. Host services aren't reachable on the NetBird IP in this mode; see "[Reaching the NAS over NetBird](#reaching-the-nas-over-netbird)" for what works (LAN-route forwarding, NetBird SSH) and the "[Advanced: kernel TUN](#advanced-kernel-tun-via-task-scheduler-lets-you-reach-the-nas-on-its-netbird-ip)" section if you want a real kernel TUN via Task Scheduler.
+That's expected. Local forwarding can reach host services without a kernel interface, and `Userspace` does not mean the connection is relayed. Check the package startup log for `netstack with local forwarding`, then test a service as described in [Reaching the NAS over NetBird](#reaching-the-nas-over-netbird).
+
+### Connected, but DSM / SSH / SMB is unreachable on the NetBird IP
+
+1. Confirm that the startup log says `netstack with local forwarding`. After installing this version, restart the package to pick up the new daemon environment.
+2. Check that the connecting peer's NetBird policy permits the NAS and service port.
+3. On the NAS, check the listener, for example `sudo netstat -lntp`, and test DSM locally with `curl -kI https://127.0.0.1:5001`. Here `-k` is only for testing DSM's local certificate. Adjust the port to your DSM configuration. If the service listens only on the LAN IP, adjust its binding or use a LAN resource/route instead.
+4. If SSH reaches the package user instead of DSM's SSH service, check whether NetBird's built-in SSH server is enabled. Disable it when you want local forwarding to DSM SSH.
+5. Check `sudo netbird status --detail` and both DSM and NetBird logs. A relayed tunnel can still reach the service; failure to establish direct P2P is a separate connectivity issue.
 
 ### Install blocked by trust level
 
@@ -261,7 +294,7 @@ netbird_<version>_synology_<amd64|arm64>.spk
     ├── conf/
     │   ├── Netbird.sc      # Port config
     │   └── logrotate.conf  # Log rotation
-    └── ui/                 # DSM AppPortal status page (admin-only)
+    └── ui/                 # DSM AppPortal status page
         ├── config          # AppPortal manifest (allUsers:false, grantPrivilege:local)
         ├── index.cgi       # Read-only status page (shell CGI)
         └── images/         # Multi-size launcher icons (16, 24, 32, 48, 64, 72, 96, 256 px)
@@ -272,32 +305,27 @@ netbird_<version>_synology_<amd64|arm64>.spk
 Edit files in `spk/` and rebuild:
 ```bash
 make clean
-make download package VERSION=<version>                          # x86_64
-make download package VERSION=<version> SYNOLOGY_ARCH=aarch64    # aarch64
+make test                                      # Python 3; no NAS or network required
+make download package                          # x86_64, pinned NetBird version
+make download package SYNOLOGY_ARCH=aarch64     # aarch64
 ```
 
 Build variables:
 
 | Variable        | Default          | Notes                                                       |
 |-----------------|------------------|-------------------------------------------------------------|
-| `VERSION`       | _required_       | NetBird upstream version (e.g. `0.70.5`)                    |
+| `VERSION`       | `VERSION` file (`0.80.0`) | NetBird upstream version, or package revision when running `make package` separately. |
 | `SYNOLOGY_ARCH` | `x86_64`         | Synology arch token written into INFO. Also accepts `aarch64`. |
 | `NETBIRD_ARCH`  | auto from above  | NetBird release arch (`amd64`/`arm64`). Override only if needed. |
 | `NETBIRD_SRC`   | `.`              | Path to NetBird source (only for `make build`)              |
 
-### Path to root mode (requires Synology code-signing)
+### Rootless implementation and privileged variants
 
-DSM 7+ blocks unsigned third-party packages from running as root, *and* refuses to honor file-capability declarations in `privilege.conf` for unsigned packages. The current code-only workaround is the Task Scheduler recipe documented in "[Advanced: kernel TUN](#advanced-kernel-tun-via-task-scheduler-lets-you-reach-the-nas-on-its-netbird-ip)"; the *clean* path — a NAS reachable on its NetBird IP straight out of Package Center, with no scheduled task and no caveats — requires getting the SPK signed by Synology through the Package Center inclusion process.
+The standard upstream binary supports rootless networking; no alternate executable or container is needed. The daemon environment follows [upstream's versioned rootless Dockerfile](https://github.com/netbirdio/netbird/blob/v0.80.0/client/Dockerfile-rootless). The [upstream forwarder](https://github.com/netbirdio/netbird/blob/v0.80.0/client/firewall/uspfilter/forwarder/forwarder.go) maps the peer's NetBird destination address to host loopback. Keep these settings on the daemon launch, since exporting them only for a CLI command does not reconfigure a running daemon.
 
-NetBird is pursuing this. When it lands, the code changes here are mechanical:
+`VERSION` is the shared default for local, PR, and release builds. Update it deliberately when validating a new upstream release. PR and release workflows run `make test` before packaging. Source builds must use a matching upstream checkout.
 
-1. **`spk/conf/privilege`** — add a `tool` block requesting `cap_net_admin,cap_net_raw` (and possibly `cap_chown`) on `bin/netbird.bin`. DSM only honors this stanza for Synology-signed packages; with signing in place the daemon picks up the capabilities it needs at start time and never has to run as root.
-2. **`spk/scripts/start-stop-status`** — drop the `id -u == 0` auto-detect block and the `NB_USE_NETSTACK_MODE` fallback. With caps granted at the binary level the daemon always has what it needs.
-3. **`README.md`** — remove the netstack caveats from the install Note, drop the "Reaching the NAS over NetBird" workaround list, and delete the "Advanced: kernel TUN" section.
-
-At build time this should produce a *second SPK variant* alongside the existing sideload one — same source tree, two `privilege.conf` files selected via a build flag, two distribution channels. The sideload SPK (this repo's current output) stays so users without Package Center access can still install; the signed SPK becomes the recommended path for end users.
-
-The signing application goes through the [Synology Developer Center](https://developer.synology.com/). The capability ask is narrow and Synology has a well-established process for this kind of inclusion. Timeline has historically been weeks to a few months. Worth flagging that this is a vendor relationship investment, not a code task: acceptance depends on Synology's review priorities, not on what we do here.
+A future package with host networking privileges would address transparent outbound access and other kernel networking needs. It is not a prerequisite for inbound service access. Synology documents its [root-package signing restriction](https://help.synology.com/developer-guide/getting_started/system_requirement.html) and [package privilege configuration](https://help.synology.com/developer-guide/privilege/privilege_config.html); any privileged variant needs separate DSM validation. The optional Task Scheduler path remains available for administrator-managed TUN operation.
 
 ## Testing & Validation
 
@@ -309,10 +337,43 @@ This is a **testing / beta fork**, not the official NetBird-maintained DSM chann
 - **DSM Package Source flow** — confirming the static catalogs at `/x86_64/index.json` and `/aarch64/index.json` are recognized by DSM and surface NetBird in **Package Center → Community** with working auto-update.
 - **Per-arch URL routing** — separate URLs per arch with single-entry catalogs avoids ambiguity in DSM's multi-entry handling. (An earlier iteration used one URL with two entries; DSM rejected it with "not supported on the platform" because of how it matches the catalog `arch` field.)
 
-### Known untested areas
+### Verified on DS1522+ (October 5, 2026)
 
-- **aarch64 on real ARM Synology hardware.** The aarch64 SPK is structurally correct (DSM accepts and installs it), but the bundled NetBird binary has not been runtime-tested on an actual ARM Synology model. If you run on one, please file an issue with results.
+Tested **x86_64, DSM 7.4.1 build 90080**, using `netbird_0.80.0-90008_synology_amd64.spk` from commit [`8491b06`](https://github.com/TechHutTV/netbird-dsm/commit/8491b06bbf717c915e477b1949e26c2eda1d0b74) and [CI run 37349381551](https://github.com/TechHutTV/netbird-dsm/actions/runs/37349381551). Installation and package lifecycle operations used DSM's `synopkg` CLI.
+
+| Check | Observed result |
+|-------|-----------------|
+| Rootless startup | NetBird 0.80.0 ran as the `netbird` user with `netstack with local forwarding` in the log; no root startup task. |
+| Allowed service access | DSM HTTPS and API authentication, DSM SSH login, and content-verified SMB write/read/delete passed over the NAS's NetBird IP. SSH reported a loopback source address. |
+| Policy enforcement | With the same client and a temporary policy disabled, TCP 22, 445, and 5001 all timed out. Port-specific policies allowed selected services while denying the others; restoring the policy restored access. Existing production policies were unchanged. |
+| Stop/start and reboot | Services recovered automatically after package stop/start and a DSM reboot, with enrollment preserved and the daemon still owned by `netbird`. |
+| Enrolled upgrade | A clean, enrolled 0.71.4 installation upgraded to 0.80.0-90008, preserving peer ID, name, and IP without another login or setup key. Forwarded services became reachable; allowed and denied port checks passed afterward. |
+| Separate-network access | From a cellular hotspot, direct NAS LAN access failed while overlay DSM authentication, SSH login, and SMB write/read/delete passed. NetBird reported direct P2P on both LAN and cellular. |
+| Status page | Displayed status matched the CLI, but this initial artifact exposed status and logs without authentication. The subsequent fix and its validation are described below. |
+
+These results cover one NAS and the tested TCP services. DSM HTTPS tests bypassed certificate-name verification when connecting by IP; they do not validate the certificate configuration. Networking regression tests use a fake daemon and simulated privileges to check service-script behavior; they do not replace hardware traffic tests.
+
+### Status-page authentication follow-up
+
+The updated CGI was installed on the same DS1522+ and checked through DSM's web server. Anonymous requests, sessions without a token, forged tokens, and sessions after logout returned HTTP 401 without status or logs. A valid administrator session and token returned HTTP 200 with the status page. Retrieving the token through the existing DSM session also passed. Browser testing confirmed that a logged-in administrator could open the page and a private window showed only the sign-in message.
+
+All 14 local tests passed, including CGI checks for non-administrators, authentication and group-lookup failures, spoofed identity headers, and requests originating from loopback. The authentication follow-up used LAN and NAS loopback access; a real non-administrator DSM session and access through an enrolled NetBird peer still need a hardware retest.
+
+### Remaining validation gaps
+
+- **Additional forwarding and recovery cases.** Forced relay, UDP forwarding, daemon crash recovery, revocation of established connections, and applications that listen only on loopback or trust local source addresses were not tested.
+- **Interactive DSM flows.** Package Center installation and visual DSM login were not exercised in a browser; the hardware tests used the package-manager CLI and DSM HTTP API.
+- **aarch64 on real ARM Synology hardware.** The 0.80.0 SPK builds with the upstream ARM64 binary, but installation and runtime behavior still need testing on an actual ARM Synology model. If you run on one, please file an issue with results.
 - **Update-detection latency.** DSM polls package sources on its own cadence; "should have updated by now" thresholds are still being characterized.
+
+### Rootless networking validation on DSM
+
+1. Install the 0.80.0 SPK for the NAS architecture and start it from Package Center as the `netbird` user. If migrating from the root workaround, stop that daemon and restore package ownership first.
+2. Enroll it, confirm the startup log says `netstack with local forwarding`, and verify the reported agent version is `0.80.0`.
+3. From an allowed peer, open DSM over HTTPS, log in through DSM SSH, and read/write a test file over SMB using the NAS's NetBird IP. Confirm each service accepts loopback connections before diagnosing the tunnel.
+4. Repeat from a peer with no applicable allow policy and confirm access is denied. Check for broad existing policies that would otherwise allow the test peer.
+5. Inspect `netbird status --detail` while using a service and record direct versus relayed connectivity. Do not treat a working relay as a local-forwarding failure.
+6. Stop/start the package, reboot DSM, and test a package upgrade. Confirm enrollment persists and service access returns without a root task.
 
 ### Reporting feedback
 

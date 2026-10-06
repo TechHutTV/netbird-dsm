@@ -2,6 +2,48 @@
 # NetBird DSM AppPortal — read-only connection status page.
 # Served at /webman/3rdparty/netbird/index.cgi behind DSM auth.
 
+# AppPortal launcher privileges do not protect direct CGI requests. Authenticate
+# using DSM's request environment before reading config, status, or logs.
+if ! DSM_USER=$(/usr/syno/synoman/webman/modules/authenticate.cgi 2>/dev/null) || [ -z "${DSM_USER}" ]; then
+    printf 'Status: 401 Unauthorized\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\n\r\n'
+    cat <<'HTML'
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>NetBird — DSM sign-in required</title></head>
+<body>
+<p>Sign in to <a href="/webman/index.cgi">DSM</a> with an administrator account, then reopen NetBird.</p>
+<script>
+// DSM may open the launcher without a SynoToken. Obtain it through the existing
+// same-origin DSM session; the CGI still validates that session on every request.
+fetch('/webman/login.cgi', { credentials: 'same-origin', cache: 'no-store' })
+    .then(function (response) {
+        if (!response.ok) throw new Error('DSM session unavailable');
+        return response.json();
+    })
+    .then(function (session) {
+        if (typeof session.SynoToken !== 'string' || !session.SynoToken) return;
+        var current = new URLSearchParams(window.location.search).get('SynoToken');
+        if (current === session.SynoToken) return; // Do not loop on a rejected session.
+        window.location.replace('/webman/3rdparty/netbird/index.cgi?SynoToken=' + encodeURIComponent(session.SynoToken));
+    })
+    .catch(function () {}); // Keep the DSM sign-in link available on failure.
+</script>
+</body>
+</html>
+HTML
+    exit 0
+fi
+
+# Resolve groups for the authenticated identity, never the CGI process user.
+DSM_GROUPS=$(/usr/bin/id -nG -- "${DSM_USER}" 2>/dev/null) || DSM_GROUPS=""
+case " ${DSM_GROUPS} " in
+    *" administrators "*) ;;
+    *)
+        printf 'Status: 403 Forbidden\r\nContent-Type: text/plain; charset=utf-8\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\n\r\nDSM administrator access is required.\n'
+        exit 0
+        ;;
+esac
+
 PKGVAR="/var/packages/netbird/var"
 PKGDEST="/var/packages/netbird/target"
 NETBIRD="${PKGDEST}/bin/netbird.bin"
@@ -132,6 +174,8 @@ fi
 [ -z "${LOG_HTML}" ] && LOG_HTML="(log file is empty or unreadable)"
 
 echo "Content-Type: text/html; charset=utf-8"
+echo "Cache-Control: no-store"
+echo "Referrer-Policy: no-referrer"
 echo ""
 
 cat <<EOF

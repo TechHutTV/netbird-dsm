@@ -5,12 +5,13 @@ on:
     branches: [main]
     paths:
       - 'Makefile'
+      - 'VERSION'
       - 'spk/**'
+      - 'tests/**'
       - '.github/workflows/pr-build.yml'
 
 permissions:
   contents: read
-  pull-requests: write
 
 concurrency:
   group: pr-build-${{ github.event.pull_request.number }}
@@ -24,12 +25,18 @@ jobs:
       pkg: ${{ steps.ver.outputs.pkg }}
       upstream: ${{ steps.ver.outputs.upstream }}
     steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Test package scripts
+        run: make test
+
       - name: Resolve versions
         id: ver
         run: |
           set -euo pipefail
-          upstream=$(curl -fsSL https://api.github.com/repos/netbirdio/netbird/releases/latest \
-                     | jq -r '.tag_name' | sed 's/^v//')
+          upstream=$(cat VERSION)
           # PR-build revision: 9000<PR_NUMBER> (e.g. PR #5 -> 90005).
           # Valid integer revision per DSM's INFO spec, well above the
           # small-integer range used for release suffixes (-1, -2, ...).
@@ -51,6 +58,8 @@ jobs:
             netbird_arch: arm64
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Download NetBird binary (upstream)
         run: |
