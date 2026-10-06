@@ -36,6 +36,7 @@ class StatusAuthTests(unittest.TestCase):
             "netbirdIp": "100.64.0.2/16",
             "daemonVersion": "0.80.0",
             "profileName": "home",
+            "management": {"url": "https://private-dashboard.example:443", "connected": True},
             "peers": {"connected": 1, "total": 3},
             "relays": {"available": 2, "total": 4},
         }
@@ -254,14 +255,39 @@ exit "$TEST_STATUS_EXIT"
         self.assertNotIn(hostile, body)
         self.assertIn('&lt;script&gt;', body)
 
-    def test_dashboard_config_uses_json_and_http_urls(self):
-        config = self.var / "config.json"
-        config.write_text('{"AdminURL":"https:\\/\\/dashboard.example/path?x=1&y=\\"two\\""}')
-        _, body, _ = self.request()
-        self.assertIn('href="https://dashboard.example/path?x=1&amp;y=&quot;two&quot;"', body)
-        for payload in ('{"AdminURL":"javascript:alert(1)"}', '{}', 'invalid json'):
-            with self.subTest(payload=payload):
-                config.write_text(payload)
+    def test_dashboard_uses_connected_management_origin(self):
+        # A Cloud default or another profile's saved AdminURL must not override
+        # the management server reported by the connected daemon.
+        for admin in ({"Scheme": "https", "Host": "app.netbird.io:443"},
+                      "https://inactive-dashboard.example"):
+            (self.var / "config.json").write_text(json.dumps({"AdminURL": admin}))
+            for management, expected in (
+                ("https://netbird.example:443", "https://netbird.example:443"),
+                ("https://netbird.example/api?token=secret#fragment", "https://netbird.example"),
+                ("http://192.0.2.10:8080/", "http://192.0.2.10:8080"),
+                ("https://[2001:db8::1]:8443/api", "https://[2001:db8::1]:8443"),
+                ("https://api.netbird.io.example/", "https://api.netbird.io.example"),
+            ):
+                with self.subTest(admin=admin, management=management):
+                    self.status["management"] = {"url": management}
+                    self.status_file.write_text(json.dumps(self.status))
+                    _, body, _ = self.request()
+                    self.assertIn(f'href="{expected}"', body)
+                    self.assertNotIn("token=secret", body)
+                    self.assertNotIn("inactive-dashboard.example", body)
+                    self.assertEqual(self.cli_args.read_text().splitlines(), ["status --json"])
+
+    def test_dashboard_cloud_and_invalid_management_fallback(self):
+        for management in (
+            "https://api.netbird.io:443", "https://api.netbird.io/api",
+            "https://API.NETBIRD.IO/", "https://api.wiretrustee.com:33073",
+            None, {}, "", "javascript:alert(1)", "ftp://example.com",
+            "https://", "https:///example.com", "https://user:secret@example.com",
+            "https://example.com\\@other.example", "https://bad\nhost.example",
+        ):
+            with self.subTest(management=management):
+                self.status["management"] = {"url": management}
+                self.status_file.write_text(json.dumps(self.status))
                 _, body, _ = self.request()
                 self.assertIn('href="https://app.netbird.io"', body)
                 self.assertNotIn('javascript:', body)

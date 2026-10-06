@@ -47,7 +47,6 @@ esac
 PKGVAR="/var/packages/netbird/var"
 PKGDEST="/var/packages/netbird/target"
 NETBIRD="${PKGDEST}/bin/netbird.bin"
-CONFIG_JSON="${PKGVAR}/config.json"
 LOG_FILE="${PKGVAR}/netbird.log"
 DOCS_URL="https://docs.netbird.io/get-started/install/synology"
 DEFAULT_DASHBOARD_URL="https://app.netbird.io"
@@ -74,15 +73,6 @@ ICON_PROFILE='<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentC
 ICON_LOG='<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>'
 ICON_CHEV='<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>'
 ICON_EXTERNAL='<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>'
-
-# Pull the per-instance dashboard URL from the daemon's config so self-hosted
-# users link to their own panel. Falls back to NetBird Cloud when unset.
-DASHBOARD_URL=$(jq -er '.AdminURL | select(type == "string")' "${CONFIG_JSON}" 2>/dev/null)
-case "${DASHBOARD_URL}" in
-    http://*|https://*) ;;
-    *) DASHBOARD_URL="${DEFAULT_DASHBOARD_URL}" ;;
-esac
-DASHBOARD_URL=$(html_escape "${DASHBOARD_URL}")
 
 # Keep CLI failure distinct from a disconnected or unconfigured daemon. Require
 # exactly one JSON object with an explicit state before rendering any fields.
@@ -153,6 +143,17 @@ else
 fi
 
 if [ "${SHOW_DASHBOARD}" = 1 ]; then
+    # Use the connected profile's management origin, since enrollment may leave
+    # AdminURL at its Cloud default. Assume the self-hosted dashboard shares it.
+    DASHBOARD_URL=$(printf '%s' "${STATUS_JSON}" | jq -er --arg cloud "${DEFAULT_DASHBOARD_URL}" '
+        .management.url | select(type == "string") |
+        capture("^(?<scheme>https?)://(?<host>[^/?#@\\\\[:space:][:cntrl:]]+)([/?#]|$)"; "i") |
+        if (.host | test("^api\\.(netbird\\.io|wiretrustee\\.com)(:[0-9]+)?$"; "i"))
+        then $cloud else .scheme + "://" + .host end
+    ' 2>/dev/null) || DASHBOARD_URL=""
+    [ -n "${DASHBOARD_URL}" ] || DASHBOARD_URL="${DEFAULT_DASHBOARD_URL}"
+    DASHBOARD_URL=$(html_escape "${DASHBOARD_URL}")
+
     NB_FQDN=$(json_field '.fqdn | select(type == "string")')
     NB_IP=$(json_field '.netbirdIp | select(type == "string")')
     PEERS=$(json_field '.peers | [.connected, .total] | map(if type == "number" and . >= 0 and . == floor then tostring else "—" end) | join(" / ")')

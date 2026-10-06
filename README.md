@@ -180,11 +180,11 @@ The page shows:
 - **Information card** — Domain Name, NetBird IP, Peers Connected, Relays, Exit Node, Agent Version, Profile (sourced from `netbird status --json`). Peer counts show connected / total; relay counts show available / total. Exit Node shows **Not reported**, because status JSON does not identify the selected exit node.
 - **Recent Activity** — collapsible tail of the daemon log with INFO/WARN/ERROR colorization
 - **Open Docs** — links to the NetBird Synology install guide
-- **Open Dashboard** — opens the management dashboard for this peer (uses `AdminURL` from `config.json`, so self-hosted deployments link to their own panel)
+- **Open Dashboard** — automatically uses the connected management server's scheme, host, and port for self-hosted instances (for example, `https://netbird.example.com:443`). NetBird Cloud opens `https://app.netbird.io`. This assumes the self-hosted dashboard shares the management server's address; no extra flag is needed.
 
 The page auto-refreshes every 10 seconds. It's strictly read-only — install/connect/disconnect still happens via the CLI.
 
-The CGI uses **jq 1.5 or newer** to parse status and dashboard configuration; the tested DSM installation provides jq 1.5. Each refresh makes one `netbird status --json` call through the existing daemon socket. Missing jq, CLI failures, malformed JSON, or an unrecognized daemon state display **Status unavailable**; missing optional fields display **—**.
+The CGI uses **jq 1.5 or newer** to parse status; the tested DSM installation provides jq 1.5. Each refresh makes one `netbird status --json` call through the existing daemon socket. Missing jq, CLI failures, malformed JSON, or an unrecognized daemon state display **Status unavailable**; missing optional fields display **—**. If the management URL is absent or invalid, the dashboard link falls back to NetBird Cloud.
 
 ## Architecture
 
