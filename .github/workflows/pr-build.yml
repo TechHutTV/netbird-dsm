@@ -27,6 +27,8 @@ jobs:
       upstream: ${{ steps.ver.outputs.upstream }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Test package scripts
         run: make test
