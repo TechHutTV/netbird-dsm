@@ -176,13 +176,15 @@ The CGI validates the DSM session and administrator membership before reading co
 
 The page shows:
 
-- **Header line** — colored status dot + the connection state (`Connected` / `Not Configured` / `Disconnected`) and FQDN when enrolled
-- **Information card** — Domain Name, NetBird IP, Peers Connected, Relays, Exit Node, Agent Version, Profile (sourced from `netbird status`)
+- **Header line** — colored status dot + the daemon's connection or login state and FQDN when connected
+- **Information card** — Domain Name, NetBird IP, Peers Connected, Relays, Exit Node, Agent Version, Profile (sourced from `netbird status --json`). Peer counts show connected / total; relay counts show available / total. Exit Node shows **Not reported**, because status JSON does not identify the selected exit node.
 - **Recent Activity** — collapsible tail of the daemon log with INFO/WARN/ERROR colorization
 - **Open Docs** — links to the NetBird Synology install guide
 - **Open Dashboard** — opens the management dashboard for this peer (uses `AdminURL` from `config.json`, so self-hosted deployments link to their own panel)
 
 The page auto-refreshes every 10 seconds. It's strictly read-only — install/connect/disconnect still happens via the CLI.
+
+The CGI uses **jq 1.5 or newer** to parse status and dashboard configuration; the tested DSM installation provides jq 1.5. Each refresh makes one `netbird status --json` call through the existing daemon socket. Missing jq, CLI failures, malformed JSON, or an unrecognized daemon state display **Status unavailable**; missing optional fields display **—**.
 
 ## Architecture
 
@@ -305,7 +307,7 @@ netbird_<version>_synology_<amd64|arm64>.spk
 Edit files in `spk/` and rebuild:
 ```bash
 make clean
-make test                                      # Python 3; no NAS or network required
+make test                                      # Python 3 + jq >= 1.5; no NAS or network required
 make download package                          # x86_64, pinned NetBird version
 make download package SYNOLOGY_ARCH=aarch64     # aarch64
 ```

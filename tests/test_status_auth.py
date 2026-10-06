@@ -4,6 +4,7 @@ Only absolute host paths are redirected into a temporary directory. Production
 authentication cannot be replaced through request headers or environment flags.
 """
 
+import json
 import os
 from pathlib import Path
 import shlex
@@ -27,9 +28,24 @@ class StatusAuthTests(unittest.TestCase):
         self.var = self.base / "var"
         self.var.mkdir()
         self.calls = self.base / "calls"
+        self.cli_args = self.base / "cli-args"
+        self.status_file = self.base / "status.json"
+        self.status = {
+            "daemonStatus": "Connected",
+            "fqdn": "private-peer.example",
+            "netbirdIp": "100.64.0.2/16",
+            "daemonVersion": "0.80.0",
+            "profileName": "home",
+            "peers": {"connected": 1, "total": 3},
+            "relays": {"available": 2, "total": 4},
+        }
+        self.status_file.write_text(json.dumps(self.status))
         self.env = {
             "PATH": f"{self.bin}:{os.defpath}",
             "TEST_CALLS": str(self.calls),
+            "TEST_CLI_ARGS": str(self.cli_args),
+            "TEST_STATUS_FILE": str(self.status_file),
+            "TEST_STATUS_EXIT": "0",
             "TEST_AUTH_USER": "dsm-admin",
             "TEST_AUTH_EXIT": "0",
             "TEST_GROUPS": "users administrators",
@@ -58,14 +74,20 @@ exit "$TEST_GROUP_EXIT"
 ''')
         self.script("netbird.bin", r'''
 printf 'netbird\n' >> "$TEST_CALLS"
-if [ "$1" = status ]; then
-    printf 'Management: Connected\nFQDN: private-peer.example\nNetBird IP: 100.64.0.2/16\nDaemon version: 0.80.0\n'
-fi
+printf '%s\n' "$*" >> "$TEST_CLI_ARGS"
+[ "$#" = 2 ] && [ "$1" = status ] && [ "$2" = --json ] || exit 1
+printf 'PRIVATE_CLI_DIAGNOSTIC\n' >&2
+cat "$TEST_STATUS_FILE"
+exit "$TEST_STATUS_EXIT"
 ''')
         # Detect data reads even if an unauthorized response hides their output.
-        for command in ("hostname", "sed", "tail"):
-            executable = shlex.quote(shutil.which(command))
+        for command in ("hostname", "sed", "tail", "jq"):
+            executable = shutil.which(command)
+            self.assertIsNotNone(executable, f"Tests require {command} (jq 1.5 or newer)")
+            executable = shlex.quote(executable)
             self.script(command, f'printf "{command}\\n" >> "$TEST_CALLS"\nexec {executable} "$@"\n')
+        for command in ("sh", "cat"):
+            (self.bin / command).symlink_to(shutil.which(command))
         (self.var / "config.json").write_text('{"AdminURL":"https://private-dashboard.example"}')
         (self.var / "netbird.log").write_text("PRIVATE_DAEMON_LOG\n")
         source = CGI.read_text()
@@ -88,6 +110,7 @@ fi
 
     def request(self, **env):
         self.calls.write_text("")
+        self.cli_args.write_text("")
         result = subprocess.run(
             ["sh", str(self.cgi)], env={**self.env, **env},
             capture_output=True, text=True, timeout=5,
@@ -98,6 +121,7 @@ fi
         self.assertIn("Cache-Control: no-store", headers)
         self.assertIn("Referrer-Policy: no-referrer", headers)
         self.assertNotIn("PRIVATE_AUTH_DIAGNOSTIC", result.stdout)
+        self.assertNotIn("PRIVATE_CLI_DIAGNOSTIC", result.stdout)
         return headers, body, self.calls.read_text().splitlines()
 
     def assert_denied(self, result, status):
@@ -105,7 +129,7 @@ fi
         self.assertIn(f"Status: {status}", headers)
         for private in ("private-peer.example", "100.64.0.2", "private-dashboard.example", "PRIVATE_DAEMON_LOG"):
             self.assertNotIn(private, body)
-        self.assertFalse(set(calls) & {"netbird", "hostname", "sed", "tail"}, calls)
+        self.assertFalse(set(calls) & {"netbird", "hostname", "sed", "tail", "jq"}, calls)
 
     def test_anonymous_requests_including_loopback_are_denied(self):
         for address in ("127.0.0.1", "192.0.2.10", "100.64.0.3"):
@@ -154,6 +178,100 @@ fi
                 self.assertEqual(calls[:2], ["auth", "groups"])
                 self.assertIn("netbird", calls)
                 self.assertIn("tail", calls)
+                self.assertEqual(self.cli_args.read_text().splitlines(), ["status --json"])
+
+    def test_json_status_fields_are_rendered(self):
+        _, body, _ = self.request()
+        for value in ("private-peer.example", "100.64.0.2/16", "1 / 3", "2 / 4", "0.80.0", "home"):
+            self.assertIn(f'class="value">{value}</span>', body)
+        self.assertIn('class="value">Not reported</span>', body)
+        self.assertNotIn('class="value">None</span>', body)
+
+    def test_explicit_daemon_states(self):
+        for state, label in (
+            ("NeedsLogin", "Not Configured"), ("LoginFailed", "Login Required"),
+            ("SessionExpired", "Login Required"), ("Connecting", "Connecting"),
+            ("Idle", "Disconnected"), ("Connected", "Connected"),
+        ):
+            with self.subTest(state=state):
+                # A stale management flag must not override the daemon state.
+                self.status_file.write_text(json.dumps({**self.status, "daemonStatus": state, "management": {"connected": True}}))
+                _, body, _ = self.request()
+                self.assertIn(f'>{label}</span>', body)
+                self.assertEqual('Open Dashboard' in body, state == "Connected")
+
+    def test_invalid_json_does_not_render_connected_data(self):
+        for payload in ("", "not json", "{}", "null", "[]", '{"daemonStatus":null}',
+                        '{"daemonStatus":false}', '{"daemonStatus":{}}',
+                        '{"daemonStatus":""}', json.dumps(self.status) + '\n{}'):
+            with self.subTest(payload=payload):
+                self.status_file.write_text(payload)
+                _, body, _ = self.request()
+                self.assertIn('>Status unavailable</span>', body)
+                self.assertNotIn('Open Dashboard', body)
+                self.assertNotIn('private-peer.example', body)
+
+    def test_cli_failure_does_not_trust_partial_output(self):
+        _, body, _ = self.request(TEST_STATUS_EXIT="1")
+        self.assertIn('>Status unavailable</span>', body)
+        self.assertNotIn('private-peer.example', body)
+        self.assertNotIn('Open Dashboard', body)
+
+    def test_missing_or_wrongly_typed_optional_fields_are_unknown(self):
+        for payload in (
+            {"daemonStatus": "Connected"},
+            {"daemonStatus": "Connected", "fqdn": [], "netbirdIp": False,
+             "daemonVersion": {}, "profileName": 42,
+             "peers": {"connected": -1, "total": "many"},
+             "relays": {"available": 1.5, "total": None}},
+        ):
+            with self.subTest(payload=payload):
+                self.status_file.write_text(json.dumps(payload))
+                _, body, _ = self.request()
+                self.assertIn('>Connected</span>', body)
+                self.assertEqual(body.count('class="value">—</span>'), 4)
+                self.assertEqual(body.count('class="value">— / —</span>'), 2)
+
+    def test_zero_counts_are_preserved(self):
+        self.status.update(peers={"connected": 0, "total": 0}, relays={"available": 0, "total": 0})
+        self.status_file.write_text(json.dumps(self.status))
+        _, body, _ = self.request()
+        self.assertEqual(body.count('class="value">0 / 0</span>'), 2)
+
+    def test_json_values_are_escaped_and_never_executed(self):
+        marker = self.base / "injected"
+        hostile = f'<script>alert("x")</script> & $(touch {marker})'
+        self.status.update(fqdn=hostile, profileName='Home "A" & <office>\nβ')
+        self.status_file.write_text(json.dumps(self.status))
+        _, body, _ = self.request()
+        self.assertNotIn(hostile, body)
+        self.assertIn('&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;', body)
+        self.assertIn('Home &quot;A&quot; &amp; &lt;office&gt;\nβ', body)
+        self.assertFalse(marker.exists())
+        self.status_file.write_text(json.dumps({"daemonStatus": hostile}))
+        _, body, _ = self.request()
+        self.assertIn('>Status unavailable</span>', body)
+        self.assertNotIn(hostile, body)
+        self.assertIn('&lt;script&gt;', body)
+
+    def test_dashboard_config_uses_json_and_http_urls(self):
+        config = self.var / "config.json"
+        config.write_text('{"AdminURL":"https:\\/\\/dashboard.example/path?x=1&y=\\"two\\""}')
+        _, body, _ = self.request()
+        self.assertIn('href="https://dashboard.example/path?x=1&amp;y=&quot;two&quot;"', body)
+        for payload in ('{"AdminURL":"javascript:alert(1)"}', '{}', 'invalid json'):
+            with self.subTest(payload=payload):
+                config.write_text(payload)
+                _, body, _ = self.request()
+                self.assertIn('href="https://app.netbird.io"', body)
+                self.assertNotIn('javascript:', body)
+
+    def test_missing_jq_reports_unavailable_without_running_cli(self):
+        (self.bin / "jq").unlink()
+        _, body, calls = self.request(PATH=str(self.bin))
+        self.assertIn('>Status unavailable</span>', body)
+        self.assertIn('requires jq', body)
+        self.assertNotIn('netbird', calls)
 
 
 if __name__ == "__main__":

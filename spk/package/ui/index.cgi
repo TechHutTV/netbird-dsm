@@ -77,51 +77,92 @@ ICON_EXTERNAL='<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="current
 
 # Pull the per-instance dashboard URL from the daemon's config so self-hosted
 # users link to their own panel. Falls back to NetBird Cloud when unset.
-DASHBOARD_URL=$(sed -n 's/.*"AdminURL"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${CONFIG_JSON}" 2>/dev/null | head -1)
-[ -z "${DASHBOARD_URL}" ] && DASHBOARD_URL="${DEFAULT_DASHBOARD_URL}"
+DASHBOARD_URL=$(jq -er '.AdminURL | select(type == "string")' "${CONFIG_JSON}" 2>/dev/null)
+case "${DASHBOARD_URL}" in
+    http://*|https://*) ;;
+    *) DASHBOARD_URL="${DEFAULT_DASHBOARD_URL}" ;;
+esac
 DASHBOARD_URL=$(html_escape "${DASHBOARD_URL}")
 
-STATUS_RAW=$("${NETBIRD}" status 2>/dev/null)
+# Keep CLI failure distinct from a disconnected or unconfigured daemon. Require
+# exactly one JSON object with an explicit state before rendering any fields.
+DAEMON_STATE=""
+STATUS_ERROR=""
+if ! command -v jq >/dev/null 2>&1; then
+    STATUS_ERROR="The status page requires jq to read NetBird status."
+elif ! STATUS_JSON=$("${NETBIRD}" status --json 2>/dev/null); then
+    STATUS_ERROR="Unable to read NetBird status. The daemon may not be running."
+elif ! DAEMON_STATE=$(printf '%s' "${STATUS_JSON}" | jq -ers '
+    if length == 1 and (.[0] | type) == "object" then
+        .[0].daemonStatus | select(type == "string" and length > 0)
+    else error("invalid status response") end
+' 2>/dev/null); then
+    STATUS_ERROR="NetBird returned invalid status information."
+fi
+
+# Filters are fixed by this script. Values are escaped as HTML, never evaluated
+# as shell code; missing or incorrectly typed fields are displayed as unknown.
+json_field() {
+    value=$(printf '%s' "${STATUS_JSON}" | jq -r "$1" 2>/dev/null) || value=""
+    [ -n "${value}" ] || value="—"
+    html_escape "${value}"
+}
 
 CARD_ROWS=""
 HINT=""
 META=""
 SHOW_DASHBOARD=0
 
-if echo "${STATUS_RAW}" | grep -q "Daemon status: NeedsLogin"; then
-    STATUS_LABEL="Not Configured"
-    DOT_CLASS="bg-yellow"
-    STATE_CLASS="state-needslogin"
-    HINT='Run <code>sudo netbird up --setup-key &hellip;</code> via SSH to enroll this device.'
-elif echo "${STATUS_RAW}" | grep -q "^Management: Connected"; then
-    STATUS_LABEL="Connected"
-    DOT_CLASS="bg-green"
-    STATE_CLASS="state-connected"
-    SHOW_DASHBOARD=1
+STATUS_LABEL="Status unavailable"
+DOT_CLASS="bg-red"
+STATE_CLASS="state-disconnected"
+if [ -n "${STATUS_ERROR}" ]; then
+    HINT="${STATUS_ERROR}"
+else
+    case "${DAEMON_STATE}" in
+        NeedsLogin)
+            STATUS_LABEL="Not Configured"
+            DOT_CLASS="bg-yellow"
+            STATE_CLASS="state-needslogin"
+            HINT='Run <code>sudo netbird up --setup-key &hellip;</code> via SSH to enroll this device.'
+            ;;
+        LoginFailed|SessionExpired)
+            STATUS_LABEL="Login Required"
+            DOT_CLASS="bg-yellow"
+            STATE_CLASS="state-needslogin"
+            HINT='Run <code>sudo netbird up</code> via SSH to sign in again.'
+            ;;
+        Connecting)
+            STATUS_LABEL="Connecting"
+            DOT_CLASS="bg-yellow"
+            STATE_CLASS="state-needslogin"
+            HINT="NetBird is connecting."
+            ;;
+        Connected)
+            STATUS_LABEL="Connected"
+            DOT_CLASS="bg-green"
+            STATE_CLASS="state-connected"
+            SHOW_DASHBOARD=1
+            ;;
+        Idle)
+            STATUS_LABEL="Disconnected"
+            HINT="NetBird is not connected."
+            ;;
+        *) HINT="Unrecognized NetBird state: $(html_escape "${DAEMON_STATE}")" ;;
+    esac
+fi
 
-    NB_FQDN=$(html_escape "$(echo "${STATUS_RAW}" | sed -n 's/^FQDN: //p')")
-    NB_IP=$(html_escape "$(echo "${STATUS_RAW}" | sed -n 's/^NetBird IP: //p')")
-    PEERS=$(html_escape "$(echo "${STATUS_RAW}" | sed -n 's/^Peers count: //p')")
-    RELAYS=$(html_escape "$(echo "${STATUS_RAW}" | sed -n 's/^Relays: //p')")
-    DAEMON_VER=$(html_escape "$(echo "${STATUS_RAW}" | sed -n 's/^Daemon version: //p')")
-    PROFILE=$(html_escape "$(echo "${STATUS_RAW}" | sed -n 's/^Profile: //p')")
+if [ "${SHOW_DASHBOARD}" = 1 ]; then
+    NB_FQDN=$(json_field '.fqdn | select(type == "string")')
+    NB_IP=$(json_field '.netbirdIp | select(type == "string")')
+    PEERS=$(json_field '.peers | [.connected, .total] | map(if type == "number" and . >= 0 and . == floor then tostring else "—" end) | join(" / ")')
+    RELAYS=$(json_field '.relays | [.available, .total] | map(if type == "number" and . >= 0 and . == floor then tostring else "—" end) | join(" / ")')
+    DAEMON_VER=$(json_field '.daemonVersion | select(type == "string")')
+    PROFILE=$(json_field '.profileName | select(type == "string")')
     META="${NB_FQDN}"
 
-    # Best-effort exit-node detection: a network with destination 0.0.0.0/0.
-    # Output format may vary; we look for any nearby peer hostname. Defaults to None.
-    NET_LIST=$("${NETBIRD}" networks list 2>/dev/null)
-    EXIT_NODE=$(echo "${NET_LIST}" | awk '
-        /0\.0\.0\.0\/0/ { in_block = 1 }
-        in_block && /[Pp]eer[s]?:/ {
-            sub(/.*: */, "")
-            sub(/^[[:space:]]*-?[[:space:]]*/, "")
-            print
-            exit
-        }
-        in_block && /^[[:space:]]*$/ { in_block = 0 }
-    ' | head -1)
-    [ -z "${EXIT_NODE}" ] && EXIT_NODE="None"
-    EXIT_NODE=$(html_escape "${EXIT_NODE}")
+    # Status JSON lists routes but does not identify the selected exit node.
+    EXIT_NODE="Not reported"
 
     CARD_ROWS=$(cat <<ROWS
         <li>
@@ -154,11 +195,6 @@ elif echo "${STATUS_RAW}" | grep -q "^Management: Connected"; then
         </li>
 ROWS
 )
-else
-    STATUS_LABEL="Disconnected"
-    DOT_CLASS="bg-red"
-    STATE_CLASS="state-disconnected"
-    HINT="Daemon not reachable or no active connection."
 fi
 
 # Recent log lines (HTML-escaped, then INFO/WARN/ERROR colorized).
