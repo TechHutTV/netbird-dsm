@@ -170,9 +170,9 @@ DSM removes `/var/packages/netbird` (binary, config, keys, logs) on uninstall �
 
 ## Status Page (DSM AppPortal)
 
-After install the package registers a NetBird entry in DSM's **Main Menu** that opens a read-only status page. The launcher is configured for DSM administrators by default; launcher access is managed through **Control Panel → Application Privileges → NetBird**.
+After install the package registers a NetBird entry in DSM's **Main Menu** that opens a read-only status page. Sign in to DSM with an account in the **administrators** group, using the same hostname or IP address as the status page. The page uses your existing DSM session; it does not need a separate NetBird login.
 
-**Known authentication issue:** on the tested DSM installation, direct requests to the status-page URL returned peer details and recent daemon logs without a DSM session, over both LAN and NetBird. Launcher privileges did not protect the CGI endpoint. This pre-existing issue remains unfixed; restrict network access to the DSM web port to trusted clients until endpoint authentication is implemented.
+The CGI validates the DSM session and administrator membership before reading configuration, querying NetBird, or returning logs. Invalid or expired sessions receive a sign-in page (HTTP 401); authenticated non-administrators receive HTTP 403. Authentication or group-lookup failures deny access. **Application Privileges** controls the launcher, but granting launcher access does not grant non-administrators access to this page.
 
 The page shows:
 
@@ -195,7 +195,7 @@ The page auto-refreshes every 10 seconds. It's strictly read-only — install/co
 - The `start-stop-status` script selects netstack for unprivileged starts even if `/dev/net/tun` is writable. An explicit **root** start can use a real TUN for system-wide outbound access; see [Advanced: kernel TUN](#advanced-kernel-tun-via-task-scheduler-system-wide-outbound-access). Network setup runs only when starting a new daemon.
 - Firewall rules are registered with DSM automatically (port 51820/udp)
 - Log rotation is handled by DSM's syslog system
-- Status page is served by DSM's web framework via the `dsmuidir` resource; see the [known authentication issue](#status-page-dsm-appportal) for direct CGI access.
+- Status page is served by DSM's web framework via the `dsmuidir` resource. The CGI calls DSM's `authenticate.cgi` and checks administrator membership before accessing package data; responses disable caching and referrer disclosure.
 
 ### DSM Integration
 
@@ -205,7 +205,7 @@ The page auto-refreshes every 10 seconds. It's strictly read-only — install/co
 | Firewall rules | `Netbird.sc` port config via `port-config` resource |
 | CLI access | `/usr/local/bin/netbird` via `usr-local-linker` resource |
 | Log rotation | `logrotate.conf` via `syslog-config` resource |
-| Status page | `ui/index.cgi` via `dsmuidir` (DSM AppPortal; direct CGI authentication remains unresolved) |
+| Status page | `ui/index.cgi` via `dsmuidir` (DSM session and administrator checks enforced by the CGI) |
 | Privileges | Unprivileged `netbird` user via `conf/privilege` (`run-as: package`); netstack with local forwarding |
 
 ## File Locations
@@ -349,9 +349,15 @@ Tested **x86_64, DSM 7.4.1 build 90080**, using `netbird_0.80.0-90008_synology_a
 | Stop/start and reboot | Services recovered automatically after package stop/start and a DSM reboot, with enrollment preserved and the daemon still owned by `netbird`. |
 | Enrolled upgrade | A clean, enrolled 0.71.4 installation upgraded to 0.80.0-90008, preserving peer ID, name, and IP without another login or setup key. Forwarded services became reachable; allowed and denied port checks passed afterward. |
 | Separate-network access | From a cellular hotspot, direct NAS LAN access failed while overlay DSM authentication, SSH login, and SMB write/read/delete passed. NetBird reported direct P2P on both LAN and cellular. |
-| Status page | Displayed status matched the CLI, but direct unauthenticated requests exposed status and logs. See the [known authentication issue](#status-page-dsm-appportal). |
+| Status page | Displayed status matched the CLI, but this initial artifact exposed status and logs without authentication. The subsequent fix and its validation are described below. |
 
-These results cover one NAS and the tested TCP services. DSM HTTPS tests bypassed certificate-name verification when connecting by IP; they do not validate the certificate configuration. The seven local regression tests use a fake daemon and simulated privileges to check service-script behavior; they do not replace hardware traffic tests.
+These results cover one NAS and the tested TCP services. DSM HTTPS tests bypassed certificate-name verification when connecting by IP; they do not validate the certificate configuration. Networking regression tests use a fake daemon and simulated privileges to check service-script behavior; they do not replace hardware traffic tests.
+
+### Status-page authentication follow-up
+
+The updated CGI was installed on the same DS1522+ and checked through DSM's web server. Anonymous requests, sessions without a token, forged tokens, and sessions after logout returned HTTP 401 without status or logs. A valid administrator session and token returned HTTP 200 with the status page. Retrieving the token through the existing DSM session also passed. Browser testing confirmed that a logged-in administrator could open the page and a private window showed only the sign-in message.
+
+All 14 local tests passed, including CGI checks for non-administrators, authentication and group-lookup failures, spoofed identity headers, and requests originating from loopback. The authentication follow-up used LAN and NAS loopback access; a real non-administrator DSM session and access through an enrolled NetBird peer still need a hardware retest.
 
 ### Remaining validation gaps
 
