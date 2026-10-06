@@ -177,12 +177,14 @@ The CGI validates the DSM session and administrator membership before reading co
 The page shows:
 
 - **Header line** — colored status dot + the daemon's connection or login state and FQDN when connected
-- **Information card** — Domain Name, NetBird IP, Peers Connected, Relays, Exit Node, Agent Version, Profile (sourced from `netbird status --json`). Peer counts show connected / total; relay counts show available / total. Exit Node shows **Not reported**, because status JSON does not identify the selected exit node.
+- **Information card** — Domain Name, NetBird IP, Peers Connected, Connection Types, Relays Available, Exit Node, Agent Version, Profile (sourced from `netbird status --json`). Peer counts show connected / total; relay counts show available / total. Exit Node shows **Not reported**, because status JSON does not identify the selected exit node.
 - **Recent Activity** — collapsible tail of the daemon log with INFO/WARN/ERROR colorization
 - **Open Docs** — links to the NetBird Synology install guide
 - **Open Dashboard** — automatically uses the connected management server's scheme, host, and port for self-hosted instances (for example, `https://netbird.example.com:443`). NetBird Cloud opens `https://app.netbird.io`. This assumes the self-hosted dashboard shares the management server's address; no extra flag is needed.
 
 The page auto-refreshes every 10 seconds. It's strictly read-only — install/connect/disconnect still happens via the CLI.
+
+**Connection Types** summarizes connected peers, for example **2 P2P · 1 relayed**. A NAS can use both at once because [connection type is determined per peer](https://docs.netbird.io/help/troubleshooting-client#connection-type). Idle and connecting peers are excluded. An unrecognized type is counted as **unknown**; missing or incomplete peer details show **Not reported**. With zero connected peers, the row shows **No connected peers**. **Relays Available** counts reachable relay servers, not peers using them.
 
 The CGI uses **jq 1.5 or newer** to parse status; the tested DSM installation provides jq 1.5. Each refresh makes one `netbird status --json` call through the existing daemon socket. Missing jq, CLI failures, malformed JSON, or an unrecognized daemon state display **Status unavailable**; missing optional fields display **—**. If the management URL is absent or invalid, the dashboard link falls back to NetBird Cloud.
 

@@ -37,7 +37,11 @@ class StatusAuthTests(unittest.TestCase):
             "daemonVersion": "0.80.0",
             "profileName": "home",
             "management": {"url": "https://private-dashboard.example:443", "connected": True},
-            "peers": {"connected": 1, "total": 3},
+            "peers": {"connected": 1, "total": 3, "details": [
+                {"status": "Connected", "connectionType": "P2P"},
+                {"status": "Idle", "connectionType": "-"},
+                {"status": "Connecting", "connectionType": "-"},
+            ]},
             "relays": {"available": 2, "total": 4},
         }
         self.status_file.write_text(json.dumps(self.status))
@@ -183,10 +187,47 @@ exit "$TEST_STATUS_EXIT"
 
     def test_json_status_fields_are_rendered(self):
         _, body, _ = self.request()
-        for value in ("private-peer.example", "100.64.0.2/16", "1 / 3", "2 / 4", "0.80.0", "home"):
+        for value in ("private-peer.example", "100.64.0.2/16", "1 / 3", "1 P2P · 0 relayed", "2 / 4", "0.80.0", "home"):
             self.assertIn(f'class="value">{value}</span>', body)
         self.assertIn('class="value">Not reported</span>', body)
         self.assertNotIn('class="value">None</span>', body)
+
+    def test_connection_types_count_connected_peers_only(self):
+        for types, expected in (
+            (["P2P", "P2P"], "2 P2P · 0 relayed"),
+            (["Relayed", "Relayed"], "0 P2P · 2 relayed"),
+            (["P2P", "P2P", "Relayed"], "2 P2P · 1 relayed"),
+            (["P2P", None, "<unknown>", {}], "1 P2P · 0 relayed · 3 unknown"),
+        ):
+            with self.subTest(types=types):
+                details = [{"status": "Connected", "connectionType": kind} for kind in types]
+                details += [
+                    {"status": "Idle", "connectionType": "P2P"},
+                    {"status": "Connecting", "connectionType": "Relayed"},
+                    {"connectionType": "P2P"},
+                ]
+                self.status["peers"] = {"connected": len(types), "total": len(details), "details": details}
+                self.status_file.write_text(json.dumps(self.status))
+                _, body, _ = self.request()
+                self.assertIn(f'class="value">{expected}</span>', body)
+                self.assertNotIn("<unknown>", body)
+                self.assertEqual(self.cli_args.read_text().splitlines(), ["status --json"])
+
+    def test_connection_types_do_not_invent_missing_details(self):
+        for details in (None, {}, [], [None], [{"status": "Connected", "connectionType": "P2P"}]):
+            with self.subTest(details=details):
+                self.status["peers"] = {"connected": 2, "total": 3, "details": details}
+                self.status_file.write_text(json.dumps(self.status))
+                _, body, _ = self.request()
+                self.assertIn('Connection Types</span>\n          <span class="value">Not reported</span>', body)
+
+    def test_connection_types_with_no_connected_peers(self):
+        for details in (None, [], [{"status": "Idle", "connectionType": "-"}]):
+            with self.subTest(details=details):
+                self.status["peers"] = {"connected": 0, "total": 1, "details": details}
+                self.status_file.write_text(json.dumps(self.status))
+                _, body, _ = self.request()
+                self.assertIn('class="value">No connected peers</span>', body)
 
     def test_explicit_daemon_states(self):
         for state, label in (

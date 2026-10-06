@@ -157,6 +157,24 @@ if [ "${SHOW_DASHBOARD}" = 1 ]; then
     NB_FQDN=$(json_field '.fqdn | select(type == "string")')
     NB_IP=$(json_field '.netbirdIp | select(type == "string")')
     PEERS=$(json_field '.peers | [.connected, .total] | map(if type == "number" and . >= 0 and . == floor then tostring else "—" end) | join(" / ")')
+    # A NAS can have direct and relayed peers at the same time. Relay availability
+    # alone does not indicate whether any peer traffic is using a relay.
+    CONNECTION_TYPES=$(json_field '
+        .peers |
+        if .connected == 0 then "No connected peers"
+        elif (.details | type) != "array" then "Not reported"
+        else
+            [.details[] | select(type == "object") | select(.status == "Connected")] as $connected |
+            if ($connected | length) != .connected then "Not reported"
+            else
+                ($connected | map(select(.connectionType == "P2P")) | length) as $p2p |
+                ($connected | map(select(.connectionType == "Relayed")) | length) as $relayed |
+                (($connected | length) - $p2p - $relayed) as $unknown |
+                "\($p2p) P2P · \($relayed) relayed" +
+                (if $unknown > 0 then " · \($unknown) unknown" else "" end)
+            end
+        end
+    ')
     RELAYS=$(json_field '.relays | [.available, .total] | map(if type == "number" and . >= 0 and . == floor then tostring else "—" end) | join(" / ")')
     DAEMON_VER=$(json_field '.daemonVersion | select(type == "string")')
     PROFILE=$(json_field '.profileName | select(type == "string")')
@@ -179,7 +197,11 @@ if [ "${SHOW_DASHBOARD}" = 1 ]; then
           <span class="value">${PEERS}</span>
         </li>
         <li>
-          <span class="label">${ICON_RELAY}Relays</span>
+          <span class="label" title="Connection type is determined separately for each connected peer.">${ICON_PEERS}Connection Types</span>
+          <span class="value">${CONNECTION_TYPES}</span>
+        </li>
+        <li>
+          <span class="label">${ICON_RELAY}Relays Available</span>
           <span class="value">${RELAYS}</span>
         </li>
         <li>
