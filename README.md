@@ -199,13 +199,42 @@ Setup:
 4. Check the startup log for `kernel TUN` and use `ip addr show wt0` to verify a host interface with the NetBird IP. `Interface type: Userspace` alone does not distinguish netstack from userspace WireGuard using a real TUN; this package always disables kernel WireGuard.
 5. Test outbound access from a NAS application to another peer, subject to NetBird policies and DSM firewall rules.
 
-To return to the normal rootless package, disable/delete the scheduled task, then stop the root daemon **before** restoring ownership:
+### Returning to Package Center
+
+Root starts can leave configuration, profiles, logs and PID files owned by root.
+Package Center cannot stop a root-owned daemon or repair those files itself.
+Disable or delete the root startup task in **Control Panel → Task Scheduler**
+first, then run the following over SSH as an administrator. If stopping fails,
+the commands stop there and keep the daemon's PID tracking.
 
 ```bash
-sudo /var/packages/netbird/scripts/start-stop-status stop
-sudo chown -R netbird:netbird /var/packages/netbird/var
-sudo synopkg start netbird
+sudo sh <<'SH'
+set -eu
+/bin/sh /var/packages/netbird/scripts/start-stop-status stop
+
+# Resolve DSM's var symlink and verify the destination before changing it.
+state_dir=$(readlink -f /var/packages/netbird/var)
+case "$state_dir" in
+    /volume[0-9]*/@appdata/netbird) ;;
+    *) printf 'Unexpected package state path: %s\n' "$state_dir" >&2; exit 1 ;;
+esac
+test -d "$state_dir"
+printf 'Restoring package-user access to %s\n' "$state_dir"
+chown -hR netbird:netbird "$state_dir"
+find "$state_dir" -type d -exec chmod u+rwx {} +
+find "$state_dir" -type f -exec chmod u+rw {} +
+SH
 ```
+
+Then start NetBird from Package Center, or run
+`sudo /usr/syno/bin/synopkg start netbird`. If DSM reports error 275 (package
+locked), let the previous package operation finish and retry the start.
+
+This preserves configuration, keys and enrollment, including nested profile
+state. It does not follow directory symlinks inside the state directory. If the
+resolved location differs from the expected DSM 7 appdata path, inspect it before
+adjusting the path check. Do not delete the configuration or run a clean reset to
+fix ownership.
 
 ### Upgrades
 
@@ -324,7 +353,7 @@ Sideloaded packages aren't signed by Synology. Go to **Package Center > Settings
 
 ### Permission denied
 
-The package runs as the unprivileged `netbird` user, and all writable state lives under `/var/packages/netbird/var`. If you see permission errors, restart the package from Package Center. If the CLI errors with `permission denied` reading profile state, run it under `sudo netbird ...` — your shell user doesn't have read access to the daemon's config directory.
+The package runs as the unprivileged `netbird` user, and all writable state lives under `/var/packages/netbird/var`. If a root start left inaccessible state, follow [Returning to Package Center](#returning-to-package-center); restarting alone does not repair ownership. If the CLI errors with `permission denied` reading profile state, run it under `sudo netbird ...` — your shell user doesn't have read access to the daemon's config directory.
 
 ### Firewall blocking connections
 

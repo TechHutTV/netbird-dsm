@@ -122,6 +122,8 @@ class ServiceNetworkingTests(unittest.TestCase):
         self.assertNotIn("NB_ENABLE_CAPTURE", env)
         self.assertEqual(calls, ["id", "lsmod"])
         self.assertIn("kernel TUN", log)
+        self.assertIn("Starting as root can create root-owned state", log)
+        self.assertIn("Returning to Package Center", log)
 
     def test_root_falls_back_when_tun_creation_fails(self):
         result = self.run_service(0, "missing")
