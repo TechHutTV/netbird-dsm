@@ -15,10 +15,44 @@ package_error() {
     return 1
 }
 
-check_manual_install() (
+package_recovery_error() (
+    state_dir=$(readlink -f "$PKGVAR" 2>/dev/null)
+    package_error "$* If NetBird was started as root, disable its Task Scheduler task, stop the daemon as root, then restore netbird:netbird ownership of ${state_dir:-$PKGVAR}. See 'Returning to Package Center' in the README. Keep the existing configuration and enrollment."
+)
+
+# Identify this package's invocation, including a root daemon whose exe link
+# DSM hides from the package user. Never treat an arbitrary PID as our daemon.
+# Return 2 when a NetBird process cannot be inspected safely.
+package_daemon_matches() (
+    proc=$1
+    if ! IFS= read -r name 2>/dev/null <"$proc/comm"; then
+        [ -d "$proc" ] && return 2
+        return 1
+    fi
+    case "$name" in netbird|netbird.bin) ;; *) return 1 ;; esac
+    args=$(tr '\000' ' ' 2>/dev/null <"$proc/cmdline") || return 2
+    case "$args" in *" service run "*) ;; *) return 1 ;; esac
+    exe=$(readlink "$proc/exe" 2>/dev/null)
+    exe=${exe% (deleted)}
+    command=${args%% *}
     package_bin=$(readlink -f "${PKGDEST}/bin/netbird.bin")
+    package_var=$(readlink -f "$PKGVAR")
+    if { [ -n "$package_bin" ] && { [ "$exe" = "$package_bin" ] || [ "$command" = "$package_bin" ]; }; } ||
+       [ "$command" = "${PKGDEST}/bin/netbird.bin" ] ||
+       [ "$command" = /var/packages/netbird/target/bin/netbird.bin ]; then
+        case "$args" in
+            *" --config ${PKGVAR}/config.json "*|*" --config ${package_var}/config.json "*|*" --config /var/packages/netbird/var/config.json "*)
+                case "$args" in
+                    *" --daemon-addr unix://${PKGVAR}/netbird.sock "*|*" --daemon-addr unix://${package_var}/netbird.sock "*|*" --daemon-addr unix:///var/packages/netbird/var/netbird.sock "*) return 0 ;;
+                esac
+                ;;
+        esac
+    fi
+    return 1
+)
+
+check_manual_install() (
     package_wrapper=$(readlink -f "${PKGDEST}/bin/netbird")
-    package_var=$(readlink -f "${PKGVAR}")
     conflicts=""
 
     # The package itself installs this link. A different target or a regular
@@ -41,22 +75,7 @@ check_manual_install() (
         # DSM denies the package user access to a root process's exe link.
         args=$(tr '\000' ' ' 2>/dev/null <"$proc/cmdline") || continue
         case "$args" in *" service run "*) ;; *) continue ;; esac
-        exe=$(readlink "$proc/exe" 2>/dev/null)
-        exe=${exe% (deleted)}
-        command=${args%% *}
-        if { [ -n "$package_bin" ] && { [ "$exe" = "$package_bin" ] || [ "$command" = "$package_bin" ]; }; } ||
-           [ "$command" = "${PKGDEST}/bin/netbird.bin" ] ||
-           [ "$command" = /var/packages/netbird/target/bin/netbird.bin ]; then
-            # An administrator may use the package binary for a separate
-            # daemon. Only exempt an invocation using this package's config.
-            case "$args" in
-                *" --config ${PKGVAR}/config.json "*|*" --config ${package_var}/config.json "*|*" --config /var/packages/netbird/var/config.json "*)
-                    case "$args" in
-                        *" --daemon-addr unix://${PKGVAR}/netbird.sock "*|*" --daemon-addr unix://${package_var}/netbird.sock "*|*" --daemon-addr unix:///var/packages/netbird/var/netbird.sock "*) continue ;;
-                    esac
-                    ;;
-            esac
-        fi
+        package_daemon_matches "$proc" && continue
         conflicts="${conflicts}
   another NetBird daemon is running (PID ${proc##*/})"
     done
@@ -85,17 +104,48 @@ Stop its daemon and disable its startup service/task, then remove only its confi
     fi
 )
 
+# Check profile/state files as well as the default config. Do not traverse
+# directory symlinks or inspect historical logs; neither is daemon state that
+# ownership recovery should silently change outside the package directory.
+check_package_state_access() (
+    state_dir=${1:-$PKGVAR}
+    [ -e "$state_dir" ] || [ -L "$state_dir" ] || return 0
+    if [ ! -d "$state_dir" ] || [ ! -r "$state_dir" ] ||
+       [ ! -w "$state_dir" ] || [ ! -x "$state_dir" ]; then
+        package_recovery_error "Cannot access the package state directory ${state_dir}."
+        return 1
+    fi
+    for entry in "$state_dir"/* "$state_dir"/.[!.]* "$state_dir"/..?*; do
+        [ -e "$entry" ] || [ -L "$entry" ] || continue
+        case "${entry##*/}" in
+            netbird.log|netbird.pid|netbird.log.*|netbird-*.log*|.config-init.*) continue ;;
+        esac
+        if [ -d "$entry" ]; then
+            if [ -L "$entry" ]; then
+                package_recovery_error "Cannot verify state through directory symlink ${entry}. Check its target with an administrator."
+                return 1
+            fi
+            check_package_state_access "$entry" || return 1
+        elif [ -f "$entry" ] || [ -L "$entry" ]; then
+            if [ ! -r "$entry" ] || [ ! -w "$entry" ]; then
+                package_recovery_error "Cannot read or update package state file ${entry}."
+                return 1
+            fi
+        fi
+    done
+)
+
 prepare_package_config() (
     if ! mkdir -p "${PKGVAR}" || [ ! -r "${PKGVAR}" ] ||
        [ ! -w "${PKGVAR}" ] || [ ! -x "${PKGVAR}" ]; then
-        package_error "Cannot access the package state directory ${PKGVAR}. Restore package-user access before starting."
+        package_recovery_error "Cannot access the package state directory ${PKGVAR}. Restore package-user access before starting."
         return 1
     fi
 
     if [ -e "${CONFIG_FILE}" ] || [ -L "${CONFIG_FILE}" ]; then
         if [ ! -f "${CONFIG_FILE}" ] || [ ! -r "${CONFIG_FILE}" ] ||
            [ ! -w "${CONFIG_FILE}" ] || [ ! -s "${CONFIG_FILE}" ]; then
-            package_error "Existing package config ${CONFIG_FILE} is empty, invalid as a file, or inaccessible. Restore it from backup or repair package-user permissions; it will not be replaced."
+            package_recovery_error "Existing package config ${CONFIG_FILE} is empty, invalid as a file, or inaccessible. Restore it from backup or repair package-user permissions; it will not be replaced."
             return 1
         fi
         return 0

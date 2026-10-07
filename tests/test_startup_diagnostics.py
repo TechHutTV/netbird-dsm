@@ -15,6 +15,11 @@ set -- load-functions
 . "$SERVICE_SCRIPT"
 check_manual_install() { return 0; }
 configure_networking() { NETWORK_MODE="test"; }
+# This fixture exits or execs sleep; production now also verifies NetBird's
+# process identity. Lifecycle/ownership tests cover that separate boundary.
+daemon_status() {
+    test -r "$PID_FILE" && test -d "/proc/$(cat "$PID_FILE")"
+}
 # Keep the actual exec/exit and /proc checks; shorten only the startup delay.
 sleep() { command sleep 0.2; }
 start_daemon

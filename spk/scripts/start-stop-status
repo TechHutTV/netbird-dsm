@@ -34,6 +34,10 @@ configure_networking() {
     NETWORK_MODE="netstack with local forwarding"
 
     if [ "$(id -u)" -eq 0 ]; then
+        state_dir=$(readlink -f "$PKGVAR")
+        warning="NetBird: Starting as root can create root-owned state. Before returning to Package Center, disable the root task, stop this daemon as root, and restore netbird:netbird ownership of ${state_dir:-$PKGVAR}. See 'Returning to Package Center' in the README."
+        printf '%s\n' "$warning" >>"$LOG_FILE"
+        printf '%s\n' "$warning" | logger -t netbird-pkg 2>/dev/null || :
         if ! lsmod 2>/dev/null | grep -q "^tun "; then
             modprobe tun 2>/dev/null || insmod /lib/modules/tun.ko 2>/dev/null || true
         fi
@@ -121,6 +125,7 @@ startup_failure_message() {
 start_daemon() (
     check_manual_install || return 1
     prepare_package_config || return 1
+    check_package_state_access || return 1
 
     # Ensure binary and CLI wrapper are executable
     chmod +x "${PKGDEST}/bin/netbird.bin" "${PKGDEST}/bin/netbird" 2>/dev/null
@@ -130,11 +135,11 @@ start_daemon() (
     fi
     if { [ -e "$LOG_FILE" ] && [ ! -f "$LOG_FILE" ]; } ||
        ! (umask 077; : >>"$LOG_FILE") 2>/dev/null || [ ! -r "$LOG_FILE" ]; then
-        package_error "Cannot open ${LOG_FILE}. Restore package-user read/write access and check free disk space before starting."
+        package_recovery_error "Cannot open ${LOG_FILE}. Restore package-user read/write access and check free disk space before starting."
         return 1
     fi
     if ! (umask 077; : >"$PID_FILE") 2>/dev/null; then
-        package_error "Cannot write ${PID_FILE}. Restore package-user write access before starting."
+        package_recovery_error "Cannot write ${PID_FILE}. Restore package-user write access before starting."
         return 1
     fi
 
@@ -169,9 +174,14 @@ start_daemon() (
     # Give the daemon a moment to start (or crash)
     sleep 2
 
-    if daemon_status; then
+    daemon_status
+    state=$?
+    if [ "$state" -eq 0 ]; then
         echo "$(date) ${SERVICE_NAME} started successfully (PID=$(cat "${PID_FILE}"))" >>"${LOG_FILE}"
         return 0
+    elif [ "$state" -eq 2 ]; then
+        package_recovery_error "$STATUS_ERROR The new daemon's PID tracking has been kept."
+        return 1
     else
         wait "$DAEMON_PID"
         DAEMON_EXIT=$?
@@ -184,64 +194,155 @@ start_daemon() (
 )
 
 stop_daemon() {
-    if [ -r "${PID_FILE}" ]; then
-        PID=$(cat "${PID_FILE}")
-        echo "$(date) Stopping ${SERVICE_NAME} PID=${PID}" >>"${LOG_FILE}"
-        kill -TERM "${PID}" 2>/dev/null
-        wait_for_status 1 || kill -KILL "${PID}" 2>/dev/null
-        rm -f "${PID_FILE}"
+    daemon_status
+    state=$?
+    if [ "$state" -eq 2 ]; then
+        package_recovery_error "$STATUS_ERROR PID tracking has been kept."
+        return 1
     fi
-}
-
-daemon_status() {
-    if [ -r "${PID_FILE}" ]; then
-        PID=$(cat "${PID_FILE}")
-        # /proc check instead of `kill -0` to avoid DSM's BASH_ERR logger
-        # noisily reporting "No such process" when the daemon has exited.
-        if [ -n "${PID}" ] && [ -d "/proc/${PID}" ]; then
-            return 0
+    if [ "$state" -eq 0 ]; then
+        if [ "$(id -u)" -ne 0 ] && [ "$(id -u)" != "$PID_UID" ]; then
+            package_recovery_error "Cannot stop NetBird PID ${PID}, owned by UID ${PID_UID}. The daemon is still running; PID tracking has been kept."
+            return 1
         fi
-        rm -f "${PID_FILE}"
+        (printf '%s Stopping %s PID=%s\n' "$(date)" "$SERVICE_NAME" "$PID" >>"$LOG_FILE") 2>/dev/null || :
+        if ! kill -TERM "$PID" 2>/dev/null && tracked_daemon_alive; then
+            package_recovery_error "Cannot stop NetBird PID ${PID}. The daemon is still running; PID tracking has been kept."
+            return 1
+        fi
+        if ! wait_for_exit 20; then
+            if ! kill -KILL "$PID" 2>/dev/null && tracked_daemon_alive; then
+                package_recovery_error "Cannot kill NetBird PID ${PID}. The daemon is still running; PID tracking has been kept."
+                return 1
+            fi
+            if ! wait_for_exit 5; then
+                package_recovery_error "NetBird PID ${PID} did not exit. PID tracking has been kept; stop the daemon before starting again."
+                return 1
+            fi
+        fi
     fi
-    return 1
+    if ! rm -f "$PID_FILE"; then
+        package_recovery_error "The daemon has stopped, but ${PID_FILE} could not be removed."
+        return 1
+    fi
+    return 0
 }
 
-wait_for_status() {
-    counter=20
+# 0: a verified package daemon is running; 1: stopped; 2: cannot determine
+# safely. This is read-only: status must not erase tracking on access failure.
+daemon_status() {
+    PID=""
+    STATUS_ERROR=""
+    if [ -e "$PID_FILE" ] || [ -L "$PID_FILE" ]; then
+        if [ -f "$PID_FILE" ] && [ -r "$PID_FILE" ]; then
+            candidate=$(cat "$PID_FILE" 2>/dev/null) || STATUS_ERROR="Cannot read PID tracking in ${PID_FILE}."
+            case "$candidate" in
+                ''|*[!0-9]*|0|1) : ;; # Never signal these; scan for an orphan below.
+                *)
+                    package_daemon_matches "/proc/$candidate"
+                    case $? in
+                        0) PID=$candidate ;;
+                        2) STATUS_ERROR="Cannot inspect tracked daemon PID ${candidate}." ;;
+                    esac
+                    ;;
+            esac
+        else
+            STATUS_ERROR="Cannot read PID tracking in ${PID_FILE}."
+        fi
+    fi
+
+    # Older launchers could remove the PID file after a failed stop. Find that
+    # daemon rather than starting a second one or reporting a successful stop.
+    for proc in /proc/[0-9]*; do
+        [ "${proc##*/}" = "$PID" ] && continue
+        IFS= read -r name 2>/dev/null <"$proc/comm" || continue
+        case "$name" in netbird|netbird.bin) ;; *) continue ;; esac
+        package_daemon_matches "$proc"
+        match=$?
+        if [ "$match" -eq 2 ]; then
+            STATUS_ERROR="Cannot inspect an existing NetBird process."
+        elif [ "$match" -eq 0 ]; then
+            if [ -n "$PID" ]; then
+                STATUS_ERROR="Multiple daemons are using this package's state. Stop them as an administrator before continuing."
+                return 2
+            fi
+            PID=${proc##*/}
+        fi
+    done
+    if [ -z "$PID" ]; then
+        [ -z "$STATUS_ERROR" ] && return 1
+        return 2
+    fi
+    PID_UID=$(awk '/^Uid:/ { print $3 }' "/proc/$PID/status" 2>/dev/null)
+    PID_START=$(awk '{ print $22 }' "/proc/$PID/stat" 2>/dev/null)
+    if [ -z "$PID_UID" ] || [ -z "$PID_START" ]; then
+        [ -d "/proc/$PID" ] || return 1
+        STATUS_ERROR="Cannot verify the owner and identity of NetBird PID ${PID}."
+        return 2
+    fi
+    tracked_daemon_alive
+}
+
+tracked_daemon_alive() {
+    [ -d "/proc/$PID" ] || return 1
+    info=$(awk '{ print $3, $22 }' "/proc/$PID/stat" 2>/dev/null)
+    # Unreadable metadata does not establish that the daemon exited.
+    [ -n "$info" ] || return 0
+    [ "${info#* }" = "$PID_START" ] || return 1
+    case "${info%% *}" in Z|X) return 1 ;; esac
+    return 0
+}
+
+wait_for_exit() {
+    counter=$1
     while [ ${counter} -gt 0 ]; do
-        daemon_status
-        [ $? -eq "$1" ] && return 0
+        tracked_daemon_alive || return 0
         counter=$((counter - 1))
         sleep 1
     done
+    tracked_daemon_alive || return 0
     return 1
+}
+
+check_existing_daemon_owner() {
+    daemon_status
+    DAEMON_STATE=$?
+    if [ "$DAEMON_STATE" -eq 2 ]; then
+        package_recovery_error "$STATUS_ERROR"
+        return 1
+    fi
+    if [ "$DAEMON_STATE" -eq 0 ] && [ "$(id -u)" != "$PID_UID" ]; then
+        package_recovery_error "NetBird is already running as UID ${PID_UID} (PID ${PID}). Stop that daemon before switching execution users."
+        return 1
+    fi
+    return 0
 }
 
 case "$1" in
 prestart)
     # Run before DSM acquires resources such as the CLI symlink. Keep the
     # start-time check as well for direct Task Scheduler/script invocation.
-    check_manual_install
+    check_manual_install && check_existing_daemon_owner && check_package_state_access
     exit $?
     ;;
 start)
-    if daemon_status; then
+    check_existing_daemon_owner || exit 1
+    if [ "$DAEMON_STATE" -eq 0 ]; then
+        check_package_state_access || exit 1
         exit 0
     fi
     start_daemon
     exit $?
     ;;
 stop)
-    if daemon_status; then
-        stop_daemon
-    fi
-    exit 0
+    stop_daemon
+    exit $?
     ;;
 status)
-    if daemon_status; then
-        exit 0
-    else
-        exit 3
-    fi
+    daemon_status
+    state=$?
+    [ "$state" -eq 0 ] && exit 0
+    [ "$state" -eq 1 ] && exit 3
+    exit 1
     ;;
 esac
