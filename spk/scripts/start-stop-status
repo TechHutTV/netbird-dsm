@@ -57,12 +57,101 @@ configure_networking() {
     fi
 }
 
-start_daemon() {
+# Keep a bounded tail and report whether this stream contained our marker.
+# Rotated files are eligible only when they contain this attempt's marker.
+startup_log_tail() {
+    awk -v marker="$START_MARKER" -v require_marker="${1:-false}" '
+        $0 == marker { count = 0; found = 1; next }
+        { lines[count++ % 20] = $0 }
+        END {
+            if (require_marker == "true" && !found) exit 1
+            first = count > 20 ? count - 20 : 0
+            for (i = first; i < count; i++) print lines[i % 20]
+            exit !found
+        }
+    '
+}
+
+capture_startup_log() {
+    # Pin the original inode across rename/unlink. If its marker disappeared,
+    # copytruncate may have moved the failure to a rotated (possibly gzipped)
+    # copy. Recover that marked tail before any post-truncation output.
+    if ! startup_log_tail <&3 >"$START_LOG"; then
+        for rotated in "$LOG_FILE".* "${LOG_FILE%.log}"-*.log*; do
+            [ -f "$rotated" ] || continue
+            case "$rotated" in "$LOG_FILE".startup.*) continue ;; esac
+            if {
+                case "$rotated" in
+                    *.gz) gzip -cd "$rotated" 2>/dev/null ;;
+                    *) cat "$rotated" ;;
+                esac
+            } | startup_log_tail true >"$START_LOG.rotated"; then
+                cat "$START_LOG" >>"$START_LOG.rotated"
+                mv "$START_LOG.rotated" "$START_LOG"
+                break
+            fi
+        done
+    fi
+    # NetBird may reopen the pathname after a rename. Read that new file too;
+    # it cannot contain output from before this attempt's marker.
+    if [ -f "$LOG_FILE" ] && [ ! "$LOG_FILE" -ef /proc/self/fd/3 ]; then
+        tail -n 20 "$LOG_FILE" >>"$START_LOG" 2>/dev/null
+    fi
+}
+
+startup_failure_message() {
+    # Never put a raw daemon line in DSM's dialog. Errors may include URLs,
+    # profile data or credentials. Only these fixed summaries leave the logs.
+    if grep -qi 'permission denied\|operation not permitted' "$START_LOG"; then
+        reason="The daemon could not access a required file or resource. Check package-user permissions on the state directory."
+    elif grep -qi 'no space left on device\|disk quota exceeded' "$START_LOG"; then
+        reason="The daemon ran out of disk space. Free space on the package volume and retry."
+    elif grep -qi 'read-only file system' "$START_LOG"; then
+        reason="The package volume is read-only. Restore write access before starting."
+    elif grep -qi 'address already in use' "$START_LOG"; then
+        reason="A daemon socket or port is already in use. Stop the conflicting instance and retry."
+    elif grep -qi 'invalid character\|unexpected end of JSON\|cannot unmarshal' "$START_LOG"; then
+        reason="The daemon could not read its configuration or profile JSON. Restore the affected file from backup; do not delete enrollment data."
+    else
+        reason="The daemon exited during startup (exit code ${DAEMON_EXIT})."
+    fi
+    package_error "$reason See ${LOG_FILE} and the netbird-pkg system log for details."
+}
+
+start_daemon() (
     check_manual_install || return 1
     prepare_package_config || return 1
 
     # Ensure binary and CLI wrapper are executable
     chmod +x "${PKGDEST}/bin/netbird.bin" "${PKGDEST}/bin/netbird" 2>/dev/null
+    if [ ! -f "${PKGDEST}/bin/netbird.bin" ] || [ ! -x "${PKGDEST}/bin/netbird.bin" ]; then
+        package_error "The package daemon is missing or not executable. Reinstall the package to restore its binary."
+        return 1
+    fi
+    if { [ -e "$LOG_FILE" ] && [ ! -f "$LOG_FILE" ]; } ||
+       ! (umask 077; : >>"$LOG_FILE") 2>/dev/null || [ ! -r "$LOG_FILE" ]; then
+        package_error "Cannot open ${LOG_FILE}. Restore package-user read/write access and check free disk space before starting."
+        return 1
+    fi
+    if ! (umask 077; : >"$PID_FILE") 2>/dev/null; then
+        package_error "Cannot write ${PID_FILE}. Restore package-user write access before starting."
+        return 1
+    fi
+
+    # Captured daemon output is private, including recovery from rotated logs.
+    umask 077
+    START_LOG=$(mktemp "${PKGVAR}/netbird.log.startup.XXXXXX") || {
+        package_error "Cannot create startup diagnostics in ${PKGVAR}. Check permissions and free disk space."
+        return 1
+    }
+    trap 'rm -f "$START_LOG" "$START_LOG.rotated"' EXIT
+    trap 'exit 1' HUP INT TERM
+    START_MARKER="--- NetBird startup ${START_LOG##*/} ---"
+    exec 3<"$LOG_FILE"
+    printf '\n%s\n' "$START_MARKER" >>"$LOG_FILE" || {
+        package_error "Cannot write ${LOG_FILE}. Check permissions and free disk space."
+        return 1
+    }
 
     configure_networking
     echo "$(date) Starting ${SERVICE_NAME} (${NETWORK_MODE})..." >>"${LOG_FILE}"
@@ -72,9 +161,10 @@ start_daemon() {
         --log-file "${LOG_FILE}" \
         --log-level info \
         --daemon-addr "${DAEMON_ADDR}" \
-        >>"${LOG_FILE}" 2>&1 &
+        3<&- >>"${LOG_FILE}" 2>&1 &
 
-    echo $! >"${PID_FILE}"
+    DAEMON_PID=$!
+    echo "$DAEMON_PID" >"${PID_FILE}"
 
     # Give the daemon a moment to start (or crash)
     sleep 2
@@ -83,14 +173,15 @@ start_daemon() {
         echo "$(date) ${SERVICE_NAME} started successfully (PID=$(cat "${PID_FILE}"))" >>"${LOG_FILE}"
         return 0
     else
-        echo "$(date) ${SERVICE_NAME} failed to start" >>"${LOG_FILE}"
-        # Surface the daemon's last output to syslog so the failure reason
-        # appears in journald alongside DSM's generic "Failed to run script".
-        tail -n 20 "${LOG_FILE}" 2>/dev/null | logger -t netbird-pkg
+        wait "$DAEMON_PID"
+        DAEMON_EXIT=$?
+        capture_startup_log
+        tail -n 20 "$START_LOG" | logger -t netbird-pkg 2>/dev/null || :
         rm -f "${PID_FILE}"
+        startup_failure_message
         return 1
     fi
-}
+)
 
 stop_daemon() {
     if [ -r "${PID_FILE}" ]; then
