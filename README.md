@@ -214,10 +214,15 @@ set -eu
 
 # Resolve DSM's var symlink and verify the destination before changing it.
 state_dir=$(readlink -f /var/packages/netbird/var)
-case "$state_dir" in
-    /volume[0-9]*/@appdata/netbird) ;;
-    *) printf 'Unexpected package state path: %s\n' "$state_dir" >&2; exit 1 ;;
+volume_number=${state_dir#/volume}
+volume_number=${volume_number%%/*}
+case "$volume_number" in
+    ''|*[!0-9]*) printf 'Unexpected package state path: %s\n' "$state_dir" >&2; exit 1 ;;
 esac
+if [ "$state_dir" != "/volume${volume_number}/@appdata/netbird" ]; then
+    printf 'Unexpected package state path: %s\n' "$state_dir" >&2
+    exit 1
+fi
 test -d "$state_dir"
 printf 'Restoring package-user access to %s\n' "$state_dir"
 chown -hR netbird:netbird "$state_dir"
