@@ -1,6 +1,6 @@
 # NetBird Synology DSM Package
 
-A Synology DSM 7.0+ package (.spk) for the [NetBird](https://netbird.io/) VPN client. Runs unprivileged with userspace local forwarding so permitted peers can reach NAS services through its NetBird IP. Provides DSM integration for daemon lifecycle, firewall rules, CLI symlink, log rotation, and a read-only status page in DSM's AppPortal. **Configuration is CLI-only** — after installing, SSH into the NAS and use the `netbird` command to connect.
+A Synology DSM 7.0+ package (.spk) for the [NetBird](https://netbird.io/) VPN client. Runs unprivileged with userspace local forwarding so permitted peers can reach NAS services through its NetBird IP. Provides DSM integration for daemon lifecycle, firewall rules, CLI symlink, log rotation, and an administrator-only status page with enrollment and connection controls. Advanced configuration is available through the `netbird` CLI.
 
 **Supported architectures:** `x86_64` (Intel/AMD — Plus series and above) and `aarch64` (64-bit ARM Synologies, e.g. DS220j-class and newer Realtek/Marvell ARM models).
 
@@ -60,7 +60,7 @@ Pick the URL matching your NAS architecture:
 2. Go to **Settings > General > Trust Level** and select **Any publisher**
 3. Go to **Settings > Package Sources**, click **Add**, give it any name, and paste the URL for your arch as the Location
 4. Open the **Community** tab — NetBird will appear there. Click **Install**.
-5. SSH into the NAS and connect via CLI (see below).
+5. Open NetBird from DSM to enroll, or connect via the CLI (see below).
 
 DSM will offer updates automatically when a new version is published.
 
@@ -70,7 +70,7 @@ DSM will offer updates automatically when a new version is published.
 2. Go to **Settings > General > Trust Level** and select **Any publisher**
 3. Go to **Manual Install** and upload the `.spk` file
 4. The package will install and start the daemon. It will not be connected yet.
-5. SSH into the NAS and connect via CLI (see below).
+5. Open NetBird from DSM to enroll, or connect via the CLI (see below).
 
 > **Rootless networking:** This package runs as the unprivileged `netbird` user in **netstack mode with local forwarding**. It does not need a kernel TUN device, file capabilities, or a root task for inbound access. NetBird forwards permitted connections on its overlay IP to services listening on the NAS's loopback address. DSM 7 restricts root privileges for unsigned packages; changing the publisher trust level does not grant root access.
 >
@@ -135,9 +135,31 @@ profile/state data, stops startup rather than silently generating a new identity
 Restore the config from backup or repair its permissions. Use the documented
 [clean reset](#start-fresh-clean-reset) only when a new enrollment is intended.
 
-## Configuration (CLI only)
+## Connection controls
 
-The DSM AppPortal page is read-only — there's no install wizard and no in-browser controls for connecting, disconnecting, or changing settings. SSH into the NAS and use the `netbird` CLI, which is symlinked to `/usr/local/bin/netbird`.
+Sign in to DSM over **HTTPS** with an administrator account and open **NetBird**.
+For a new device, choose NetBird Cloud or enter your self-hosted HTTPS management
+URL, paste a setup key from that server's dashboard, and select **Enroll and
+connect**. The page clears the key after submission and does not save it.
+
+Use **Disconnect** to leave the network while keeping enrollment and the daemon
+running, then **Connect** to reconnect. Disconnecting through a NetBird connection
+can close your DSM session; use a LAN connection when testing these controls.
+The page refreshes status without clearing an enrollment form you are filling in.
+
+Start, stop, and restart the package through **Package Center**. Web connection
+controls require Python 3 on DSM and a daemon running as the `netbird` package
+user. The optional root Task Scheduler mode requires the CLI; follow
+[Returning to Package Center](#returning-to-package-center) to restore web controls.
+
+The controls authenticate each request with DSM and require administrator access,
+HTTPS, and same-origin POST requests. They talk to NetBird's HTTP/JSON API through
+a Unix socket inside a private package directory. No TCP control port is opened.
+
+## Configuration through the CLI
+
+For interactive login and advanced settings, SSH into the NAS and use the
+`netbird` CLI, which is symlinked to `/usr/local/bin/netbird`.
 
 ```bash
 # Connect using a setup key
@@ -263,7 +285,7 @@ DSM removes `/var/packages/netbird` (binary, config, keys, logs) on uninstall �
 
 ## Status Page (DSM AppPortal)
 
-After install the package registers a NetBird entry in DSM's **Main Menu** that opens a read-only status page. Sign in to DSM with an account in the **administrators** group, using the same hostname or IP address as the status page. The page uses your existing DSM session; it does not need a separate NetBird login.
+After install the package registers a NetBird entry in DSM's **Main Menu** that opens its status page and connection controls. Sign in to DSM with an account in the **administrators** group, using the same hostname or IP address as the page. The page uses your existing DSM session; it does not need a separate NetBird login.
 
 The CGI validates the DSM session and administrator membership before reading configuration, querying NetBird, or returning logs. Invalid or expired sessions receive a sign-in page (HTTP 401); authenticated non-administrators receive HTTP 403. Authentication or group-lookup failures deny access. **Application Privileges** controls the launcher, but granting launcher access does not grant non-administrators access to this page.
 
@@ -271,16 +293,29 @@ The page shows:
 
 - **Header line** — colored status dot + the daemon's connection or login state and FQDN when connected
 - **Information card** — Domain Name, NetBird IP, Peers Connected, Connection Types, Relays Available, Exit Node, Agent Version, Profile (sourced from `netbird status --json`). Peer counts show connected / total; relay counts show available / total. Exit Node shows **Not reported**, because status JSON does not identify the selected exit node.
-- **Copy IP** — copies the NetBird IPv4 address without its CIDR suffix. If the browser blocks automatic copying, a selected address field is shown for manual copying.
-- **Recent Activity** — collapsible tail of the daemon log with INFO/WARN/ERROR colorization
+- **Copy IP icon** — copies the NetBird IPv4 address without its CIDR suffix and shows a checkmark. If the browser blocks automatic copying, a selected address field is shown for manual copying.
+- **Connection health** — management, signal, and relay availability from the private JSON socket, with a last-updated time and a stale-data message when refresh fails.
+- **Peers** — expandable peer details: name, IP, state, direct/relayed connection, latency, last handshake, and received/sent traffic. Up to 500 peers are shown; missing measurements are marked as unavailable.
+- **Troubleshooting** — the latest 200 log lines with severity and text filters, temporary debug logging, and debug bundles.
 - **Open Docs** — links to the NetBird Synology install guide
 - **Open Dashboard** — automatically uses the connected management server's scheme, host, and port for self-hosted instances (for example, `https://netbird.example.com:443`). NetBird Cloud opens `https://app.netbird.io`. This assumes the self-hosted dashboard shares the management server's address; no extra flag is needed.
 
-The page auto-refreshes every 10 seconds. It's strictly read-only — install/connect/disconnect still happens via the CLI.
+Status refreshes every 10 seconds without reloading the page or clearing form input.
+See [Connection controls](#connection-controls) for enrollment and connecting or disconnecting.
 
 **Connection Types** summarizes connected peers, for example **2 P2P · 1 relayed**. A NAS can use both at once because [connection type is determined per peer](https://docs.netbird.io/help/troubleshooting-client#connection-type). Idle and connecting peers are excluded. An unrecognized type is counted as **unknown**; missing or incomplete peer details show **Not reported**. With zero connected peers, the row shows **No connected peers**. **Relays Available** counts reachable relay servers, not peers using them.
 
-The CGI uses **jq 1.5 or newer** to parse status; the tested DSM installation provides jq 1.5. Each refresh makes one `netbird status --json` call through the existing daemon socket. Missing jq, CLI failures, malformed JSON, or an unrecognized daemon state display **Status unavailable**; missing optional fields display **—**. If the management URL is absent or invalid, the dashboard link falls back to NetBird Cloud.
+The summary CGI uses **jq 1.5 or newer** to parse status; the tested DSM installation provides jq 1.5. Each refresh makes one `netbird status --json` call through the existing daemon socket. Peer details, health, log level, and diagnostic operations use the private HTTP/JSON socket through an authenticated Python helper. Missing jq, CLI failures, malformed JSON, or an unrecognized daemon state display **Status unavailable**; missing optional fields display **—**. If the management URL is absent or invalid, the dashboard link falls back to NetBird Cloud.
+
+### Debug logging and support bundles
+
+Open **Troubleshooting** over HTTPS while signed in as a DSM administrator.
+
+- **Enable debug for 10 minutes** changes only the running daemon's log level. A package-user background timer restores the previous level even after the browser closes. **Stop debug logging** restores it early. Restarting the package uses its normal startup level; the timer does not change a replacement daemon or overwrite a later CLI log-level change.
+- **Upload to NetBird support** creates a bundle with strict anonymization, system information, and one rotated log file. **Create and upload bundle** sends it to NetBird's fixed HTTPS support service, including on self-hosted networks. After a successful upload, copy the displayed **support code** into your support request. The UI does not submit a support ticket.
+- **Download only** creates the same anonymized ZIP without uploading it. Upload failures also leave a download when bundle creation succeeds. Review downloaded bundles before sharing them; anonymization is not a guarantee that every identifying detail is removed.
+
+The latest bundle and its result are retained in a private package-user directory under `SYNOPKG_PKGVAR/run/ui-diagnostics/`. Creating another bundle replaces the previous result. Downloads require the current bundle ID and an authenticated HTTPS POST; file paths are never accepted from the browser. Bundles are limited to 50 MiB, matching NetBird's upload limit. Collection runs in the background without reconnecting the NAS. Host diagnostics can take several minutes on DSM; the page shows job progress and pauses live status polling while NetBird collects the bundle. The support code is NetBird's returned upload key, not a generated local reference. See [NetBird's debug-bundle documentation](https://docs.netbird.io/help/troubleshooting-client#debug-bundle-uploads).
 
 ## Architecture
 
@@ -405,9 +440,15 @@ netbird_<version>_synology_<amd64|arm64>.spk
     ├── conf/
     │   ├── Netbird.sc      # Port config
     │   └── logrotate.conf  # Log rotation
-    └── ui/                 # DSM AppPortal status page
+    ├── libexec/
+    │   ├── ui-control.py   # Authenticated actions over the JSON socket
+    │   └── ui-diagnostics.py # Peer details, debug timer, and bundle jobs
+    └── ui/                 # DSM AppPortal status and connection controls
         ├── config          # AppPortal manifest (allUsers:false, grantPrivilege:local)
-        ├── index.cgi       # Read-only status page (shell CGI)
+        ├── index.cgi       # Status page (shell CGI)
+        ├── action.cgi      # Connection and diagnostic actions
+        ├── details.cgi     # Authenticated peer, health, log, and job data
+        ├── controls.js     # Enrollment, diagnostics, and status refresh
         └── images/         # Multi-size launcher icons (16, 24, 32, 48, 64, 72, 96, 256 px)
 ```
 

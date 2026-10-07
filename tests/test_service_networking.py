@@ -85,9 +85,14 @@ class ServiceNetworkingTests(unittest.TestCase):
             )
             self.assertEqual(daemon_env["NB_STATE_DIR"], str(pkgvar))
             self.assertEqual(daemon_env["NB_DAEMON_ADDR"], f"unix://{pkgvar}/netbird.sock")
+            self.assertEqual(daemon_env["NB_ENABLE_JSON_SOCKET"], "true")
+            self.assertEqual(daemon_env["NB_JSON_SOCKET"], f"unix://{pkgvar}/run/netbird-http.sock")
             args = (pkgvar / "daemon.args").read_text().splitlines()
             self.assertEqual(args[:2], ["service", "run"])
             self.assertEqual(args[args.index("--config") + 1], str(pkgvar / "config.json"))
+            self.assertIn("--enable-json-socket", args)
+            self.assertEqual(args[args.index("--json-socket") + 1], f"unix://{pkgvar}/run/netbird-http.sock")
+            self.assertEqual((pkgvar / "run").stat().st_mode & 0o777, 0o700)
             self.assertEqual(daemon_env["NB_WG_KERNEL_DISABLED"], "true")
             return daemon_env, calls, (pkgvar / "netbird.log").read_text()
 
@@ -110,6 +115,8 @@ class ServiceNetworkingTests(unittest.TestCase):
             "NB_ENABLE_NETSTACK_LOCAL_FORWARDING": "false",
             "NB_DISABLE_DNS": "false",
             "NB_ENABLE_CAPTURE": "true",
+            "NB_ENABLE_JSON_SOCKET": "false",
+            "NB_JSON_SOCKET": "tcp://0.0.0.0:8080",
         })
         self.assert_netstack(result)
         self.assertEqual(result[1], ["id"])
@@ -140,7 +147,7 @@ class ServiceNetworkingTests(unittest.TestCase):
 
     def test_shell_syntax(self):
         for script in [*ROOT.glob("spk/scripts/*"), ROOT / "spk/INFO.sh",
-                       ROOT / "spk/wrapper/netbird", ROOT / "spk/package/ui/index.cgi"]:
+                       ROOT / "spk/wrapper/netbird", *ROOT.glob("spk/package/ui/*.cgi")]:
             with self.subTest(script=script.name):
                 subprocess.run(["sh", "-n", str(script)], check=True, capture_output=True)
 
