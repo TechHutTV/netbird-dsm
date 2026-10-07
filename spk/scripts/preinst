@@ -1,2 +1,7 @@
 #!/bin/sh
-exit 0
+
+PKGVAR="${SYNOPKG_PKGVAR:-/var/packages/netbird/var}"
+PKGDEST="${SYNOPKG_PKGDEST:-/var/packages/netbird/target}"
+. "$(dirname "$0")/netbird-common"
+
+check_manual_install

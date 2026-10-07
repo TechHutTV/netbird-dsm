@@ -38,6 +38,8 @@ set -- "$TEST_ACTION"
 # The fake daemon exits after recording its environment, so use its output as
 # readiness rather than the real daemon's Linux /proc lifetime check.
 daemon_status() { test -s "$SYNOPKG_PKGVAR/daemon.env"; }
+# Conflict detection has its own isolated filesystem/process fixtures.
+check_manual_install() { return 0; }
 start_daemon
 '''
 
@@ -69,7 +71,7 @@ class ServiceNetworkingTests(unittest.TestCase):
                 CALLS=str(base / "calls"),
             )
             result = subprocess.run(
-                ["sh", "-c", HARNESS], env=env, capture_output=True, text=True, timeout=10
+                ["sh", "-c", HARNESS, str(SERVICE)], env=env, capture_output=True, text=True, timeout=10
             )
             self.assertEqual(result.returncode, 3 if action == "status" else 0, result.stderr)
             calls = (base / "calls").read_text().splitlines() if (base / "calls").exists() else []

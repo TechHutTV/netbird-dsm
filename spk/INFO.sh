@@ -45,4 +45,5 @@ os_max_ver=""
 extractsize="${EXTRACTSIZE}"
 dsmuidir="ui"
 dsmappname="com.netbird.netbird"
+precheckstartstop="yes"
 EOF

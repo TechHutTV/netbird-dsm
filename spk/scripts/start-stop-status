@@ -14,6 +14,8 @@ CONFIG_FILE="${PKGVAR}/config.json"
 SOCKET_FILE="${PKGVAR}/netbird.sock"
 DAEMON_ADDR="unix://${SOCKET_FILE}"
 
+. "$(dirname "$0")/netbird-common"
+
 # NetBird bundles wireguard-go, so kernel WireGuard is never needed.
 export NB_WG_KERNEL_DISABLED=true
 
@@ -56,8 +58,8 @@ configure_networking() {
 }
 
 start_daemon() {
-    # Ensure var directory is writable
-    mkdir -p "${PKGVAR}"
+    check_manual_install || return 1
+    prepare_package_config || return 1
 
     # Ensure binary and CLI wrapper are executable
     chmod +x "${PKGDEST}/bin/netbird.bin" "${PKGDEST}/bin/netbird" 2>/dev/null
@@ -125,6 +127,12 @@ wait_for_status() {
 }
 
 case "$1" in
+prestart)
+    # Run before DSM acquires resources such as the CLI symlink. Keep the
+    # start-time check as well for direct Task Scheduler/script invocation.
+    check_manual_install
+    exit $?
+    ;;
 start)
     if daemon_status; then
         exit 0
