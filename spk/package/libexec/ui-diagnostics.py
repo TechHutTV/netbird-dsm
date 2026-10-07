@@ -30,12 +30,12 @@ def directory(api):
     return path
 
 
-def private_file(path, flags=os.O_RDONLY):
+def private_file(path, flags=os.O_RDONLY, *, require_private=True):
     fd = os.open(str(path), flags | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
     try:
         info = os.fstat(fd)
         if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
-                or info.st_nlink != 1 or info.st_mode & 0o077):
+                or info.st_nlink != 1 or (require_private and info.st_mode & 0o077)):
             raise OSError("unsafe diagnostics file")
         return os.fdopen(fd, "rb"), info
     except Exception:
@@ -242,7 +242,9 @@ def counters(value):
 
 def recent_logs(api):
     try:
-        file, info = private_file(api.var / "netbird.log")
+        # Existing daemon logs may be group/world readable. Keep the owner,
+        # regular-file and link checks without requiring diagnostics-file modes.
+        file, info = private_file(api.var / "netbird.log", require_private=False)
         with file:
             file.seek(max(0, info.st_size - 131072))
             value = file.read(131072).decode("utf-8", errors="replace")

@@ -138,6 +138,38 @@ class DiagnosticsTests(unittest.TestCase):
         path.symlink_to('/etc/passwd')
         self.assertEqual(diag.recent_logs(self.api), [])
 
+    def test_readable_logs_with_shared_permissions_are_shown(self):
+        path = self.var / 'netbird.log'
+        path.write_text('INFO existing log\nWARN recent event\n')
+        for mode in (0o600, 0o640, 0o644):
+            with self.subTest(mode=oct(mode)):
+                path.chmod(mode)
+                self.assertEqual(diag.recent_logs(self.api),
+                                 ['INFO existing log', 'WARN recent event'])
+                self.assertEqual(path.stat().st_mode & 0o777, mode)
+
+    def test_logs_still_reject_hard_links_wrong_owners_and_nonregular_files(self):
+        path = self.var / 'netbird.log'
+        path.write_text('INFO log that must not be read\n')
+        path.chmod(0o644)
+        with patch.object(diag.os, 'geteuid', return_value=os.geteuid() + 1):
+            self.assertEqual(diag.recent_logs(self.api), [])
+        alias = self.var / 'linked.log'
+        os.link(str(path), str(alias))
+        self.assertEqual(diag.recent_logs(self.api), [])
+        path.unlink()
+        os.mkfifo(str(path), 0o644)
+        self.assertEqual(diag.recent_logs(self.api), [])
+
+    def test_diagnostic_state_still_requires_private_permissions(self):
+        diag.save_state(self.api, 'bundle', {'state': 'complete'})
+        path = diag.directory(self.api) / 'bundle.json'
+        for mode in (0o640, 0o644):
+            with self.subTest(mode=oct(mode)):
+                path.chmod(mode)
+                with self.assertRaises(OSError):
+                    diag.read_state(self.api, 'bundle')
+
     def test_temporary_debug_restores_previous_level_at_expiry(self):
         self.level = 'WARN'
         current = self.start_debug()
