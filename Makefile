@@ -127,7 +127,7 @@ help:
 	@echo "  build     - Build NetBird from source (requires upstream's Go toolchain)"
 	@echo "  package   - Assemble the SPK package (run download or build first)"
 	@echo "  clean     - Remove build artifacts"
-	@echo "  test      - Check service networking configuration (requires Python 3)"
+	@echo "  test      - Check service networking and status CGI (requires Python 3 and jq >= 1.5)"
 	@echo "  help      - Show this help"
 	@echo ""
 	@echo "Quick start:"

@@ -47,7 +47,6 @@ esac
 PKGVAR="/var/packages/netbird/var"
 PKGDEST="/var/packages/netbird/target"
 NETBIRD="${PKGDEST}/bin/netbird.bin"
-CONFIG_JSON="${PKGVAR}/config.json"
 LOG_FILE="${PKGVAR}/netbird.log"
 DOCS_URL="https://docs.netbird.io/get-started/install/synology"
 DEFAULT_DASHBOARD_URL="https://app.netbird.io"
@@ -75,53 +74,114 @@ ICON_LOG='<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor
 ICON_CHEV='<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>'
 ICON_EXTERNAL='<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>'
 
-# Pull the per-instance dashboard URL from the daemon's config so self-hosted
-# users link to their own panel. Falls back to NetBird Cloud when unset.
-DASHBOARD_URL=$(sed -n 's/.*"AdminURL"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${CONFIG_JSON}" 2>/dev/null | head -1)
-[ -z "${DASHBOARD_URL}" ] && DASHBOARD_URL="${DEFAULT_DASHBOARD_URL}"
-DASHBOARD_URL=$(html_escape "${DASHBOARD_URL}")
+# Keep CLI failure distinct from a disconnected or unconfigured daemon. Require
+# exactly one JSON object with an explicit state before rendering any fields.
+DAEMON_STATE=""
+STATUS_ERROR=""
+if ! command -v jq >/dev/null 2>&1; then
+    STATUS_ERROR="The status page requires jq to read NetBird status."
+elif ! STATUS_JSON=$("${NETBIRD}" status --json 2>/dev/null); then
+    STATUS_ERROR="Unable to read NetBird status. The daemon may not be running."
+elif ! DAEMON_STATE=$(printf '%s' "${STATUS_JSON}" | jq -ers '
+    if length == 1 and (.[0] | type) == "object" then
+        .[0].daemonStatus | select(type == "string" and length > 0)
+    else error("invalid status response") end
+' 2>/dev/null); then
+    STATUS_ERROR="NetBird returned invalid status information."
+fi
 
-STATUS_RAW=$("${NETBIRD}" status 2>/dev/null)
+# Filters are fixed by this script. Values are escaped as HTML, never evaluated
+# as shell code; missing or incorrectly typed fields are displayed as unknown.
+json_field() {
+    value=$(printf '%s' "${STATUS_JSON}" | jq -r "$1" 2>/dev/null) || value=""
+    [ -n "${value}" ] || value="—"
+    html_escape "${value}"
+}
 
 CARD_ROWS=""
 HINT=""
 META=""
 SHOW_DASHBOARD=0
 
-if echo "${STATUS_RAW}" | grep -q "Daemon status: NeedsLogin"; then
-    STATUS_LABEL="Not Configured"
-    DOT_CLASS="bg-yellow"
-    STATE_CLASS="state-needslogin"
-    HINT='Run <code>sudo netbird up --setup-key &hellip;</code> via SSH to enroll this device.'
-elif echo "${STATUS_RAW}" | grep -q "^Management: Connected"; then
-    STATUS_LABEL="Connected"
-    DOT_CLASS="bg-green"
-    STATE_CLASS="state-connected"
-    SHOW_DASHBOARD=1
+STATUS_LABEL="Status unavailable"
+DOT_CLASS="bg-red"
+STATE_CLASS="state-disconnected"
+if [ -n "${STATUS_ERROR}" ]; then
+    HINT="${STATUS_ERROR}"
+else
+    case "${DAEMON_STATE}" in
+        NeedsLogin)
+            STATUS_LABEL="Not Configured"
+            DOT_CLASS="bg-yellow"
+            STATE_CLASS="state-needslogin"
+            HINT='Run <code>sudo netbird up --setup-key &hellip;</code> via SSH to enroll this device.'
+            ;;
+        LoginFailed|SessionExpired)
+            STATUS_LABEL="Login Required"
+            DOT_CLASS="bg-yellow"
+            STATE_CLASS="state-needslogin"
+            HINT='Run <code>sudo netbird up</code> via SSH to sign in again.'
+            ;;
+        Connecting)
+            STATUS_LABEL="Connecting"
+            DOT_CLASS="bg-yellow"
+            STATE_CLASS="state-needslogin"
+            HINT="NetBird is connecting."
+            ;;
+        Connected)
+            STATUS_LABEL="Connected"
+            DOT_CLASS="bg-green"
+            STATE_CLASS="state-connected"
+            SHOW_DASHBOARD=1
+            ;;
+        Idle)
+            STATUS_LABEL="Disconnected"
+            HINT="NetBird is not connected."
+            ;;
+        *) HINT="Unrecognized NetBird state: $(html_escape "${DAEMON_STATE}")" ;;
+    esac
+fi
 
-    NB_FQDN=$(html_escape "$(echo "${STATUS_RAW}" | sed -n 's/^FQDN: //p')")
-    NB_IP=$(html_escape "$(echo "${STATUS_RAW}" | sed -n 's/^NetBird IP: //p')")
-    PEERS=$(html_escape "$(echo "${STATUS_RAW}" | sed -n 's/^Peers count: //p')")
-    RELAYS=$(html_escape "$(echo "${STATUS_RAW}" | sed -n 's/^Relays: //p')")
-    DAEMON_VER=$(html_escape "$(echo "${STATUS_RAW}" | sed -n 's/^Daemon version: //p')")
-    PROFILE=$(html_escape "$(echo "${STATUS_RAW}" | sed -n 's/^Profile: //p')")
+if [ "${SHOW_DASHBOARD}" = 1 ]; then
+    # Use the connected profile's management origin, since enrollment may leave
+    # AdminURL at its Cloud default. Assume the self-hosted dashboard shares it.
+    DASHBOARD_URL=$(printf '%s' "${STATUS_JSON}" | jq -er --arg cloud "${DEFAULT_DASHBOARD_URL}" '
+        .management.url | select(type == "string") |
+        capture("^(?<scheme>https?)://(?<host>[^/?#@\\\\[:space:][:cntrl:]]+)([/?#]|$)"; "i") |
+        if (.host | test("^api\\.(netbird\\.io|wiretrustee\\.com)(:[0-9]+)?$"; "i"))
+        then $cloud else .scheme + "://" + .host end
+    ' 2>/dev/null) || DASHBOARD_URL=""
+    [ -n "${DASHBOARD_URL}" ] || DASHBOARD_URL="${DEFAULT_DASHBOARD_URL}"
+    DASHBOARD_URL=$(html_escape "${DASHBOARD_URL}")
+
+    NB_FQDN=$(json_field '.fqdn | select(type == "string")')
+    NB_IP=$(json_field '.netbirdIp | select(type == "string")')
+    PEERS=$(json_field '.peers | [.connected, .total] | map(if type == "number" and . >= 0 and . == floor then tostring else "—" end) | join(" / ")')
+    # A NAS can have direct and relayed peers at the same time. Relay availability
+    # alone does not indicate whether any peer traffic is using a relay.
+    CONNECTION_TYPES=$(json_field '
+        .peers |
+        if .connected == 0 then "No connected peers"
+        elif (.details | type) != "array" then "Not reported"
+        else
+            [.details[] | select(type == "object") | select(.status == "Connected")] as $connected |
+            if ($connected | length) != .connected then "Not reported"
+            else
+                ($connected | map(select(.connectionType == "P2P")) | length) as $p2p |
+                ($connected | map(select(.connectionType == "Relayed")) | length) as $relayed |
+                (($connected | length) - $p2p - $relayed) as $unknown |
+                "\($p2p) P2P · \($relayed) relayed" +
+                (if $unknown > 0 then " · \($unknown) unknown" else "" end)
+            end
+        end
+    ')
+    RELAYS=$(json_field '.relays | [.available, .total] | map(if type == "number" and . >= 0 and . == floor then tostring else "—" end) | join(" / ")')
+    DAEMON_VER=$(json_field '.daemonVersion | select(type == "string")')
+    PROFILE=$(json_field '.profileName | select(type == "string")')
     META="${NB_FQDN}"
 
-    # Best-effort exit-node detection: a network with destination 0.0.0.0/0.
-    # Output format may vary; we look for any nearby peer hostname. Defaults to None.
-    NET_LIST=$("${NETBIRD}" networks list 2>/dev/null)
-    EXIT_NODE=$(echo "${NET_LIST}" | awk '
-        /0\.0\.0\.0\/0/ { in_block = 1 }
-        in_block && /[Pp]eer[s]?:/ {
-            sub(/.*: */, "")
-            sub(/^[[:space:]]*-?[[:space:]]*/, "")
-            print
-            exit
-        }
-        in_block && /^[[:space:]]*$/ { in_block = 0 }
-    ' | head -1)
-    [ -z "${EXIT_NODE}" ] && EXIT_NODE="None"
-    EXIT_NODE=$(html_escape "${EXIT_NODE}")
+    # Status JSON lists routes but does not identify the selected exit node.
+    EXIT_NODE="Not reported"
 
     CARD_ROWS=$(cat <<ROWS
         <li>
@@ -130,14 +190,21 @@ elif echo "${STATUS_RAW}" | grep -q "^Management: Connected"; then
         </li>
         <li>
           <span class="label">${ICON_PIN}NetBird IP</span>
-          <span class="value">${NB_IP}</span>
+          <span class="ip-value">
+            <span id="netbird-ip" class="value">${NB_IP}</span>
+            <button id="copy-ip" class="btn btn-copy" type="button" disabled>Copy IP</button>
+          </span>
         </li>
         <li>
           <span class="label">${ICON_PEERS}Peers Connected</span>
           <span class="value">${PEERS}</span>
         </li>
         <li>
-          <span class="label">${ICON_RELAY}Relays</span>
+          <span class="label" title="Connection type is determined separately for each connected peer.">${ICON_PEERS}Connection Types</span>
+          <span class="value">${CONNECTION_TYPES}</span>
+        </li>
+        <li>
+          <span class="label">${ICON_RELAY}Relays Available</span>
           <span class="value">${RELAYS}</span>
         </li>
         <li>
@@ -154,11 +221,6 @@ elif echo "${STATUS_RAW}" | grep -q "^Management: Connected"; then
         </li>
 ROWS
 )
-else
-    STATUS_LABEL="Disconnected"
-    DOT_CLASS="bg-red"
-    STATE_CLASS="state-disconnected"
-    HINT="Daemon not reachable or no active connection."
 fi
 
 # Recent log lines (HTML-escaped, then INFO/WARN/ERROR colorized).
@@ -274,6 +336,16 @@ cat <<EOF
       font-size: 0.84rem; text-align: right;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
+    .ip-value {
+      display: flex; align-items: center; justify-content: flex-end;
+      flex-wrap: wrap; gap: 0.5rem; min-width: 0;
+    }
+    .copy-feedback { margin: 0.75rem 0 0; font-size: 0.8125rem; color: var(--text-soft); }
+    .copy-feedback:empty { display: none; }
+    .copy-feedback input {
+      width: 11rem; margin-left: 0.5rem; padding: 0.25rem;
+      color: var(--text); background: var(--card); border: 1px solid var(--border-strong);
+    }
     details.log {
       margin-top: 1rem; background: var(--card);
       border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
@@ -312,6 +384,9 @@ cat <<EOF
       color: var(--text-soft); background: var(--card);
     }
     .btn:hover { background: #25282d; color: var(--text); }
+    .btn:focus-visible { outline: 2px solid var(--netbird); outline-offset: 2px; }
+    .btn:disabled { opacity: 0.5; cursor: default; }
+    .btn-copy { padding: 0.25rem 0.5rem; font-family: inherit; font-size: 0.75rem; flex-shrink: 0; }
     .btn .icon { width: 14px; height: 14px; color: currentColor; }
     .btn-primary { background: var(--netbird); border-color: var(--netbird); color: #fff; }
     .btn-primary:hover { background: #f46d1b; border-color: #f46d1b; color: #fff; }
@@ -334,6 +409,7 @@ $([ -n "${META}" ] && printf '      <span class="sep">·</span><span class="meta
     </div>
 $([ -n "${HINT}" ] && printf '    <p class="hint">%s</p>\n' "${HINT}")
 $([ -n "${CARD_ROWS}" ] && printf '    <div class="card">\n      <ul class="list">\n%s\n      </ul>\n    </div>\n' "${CARD_ROWS}")
+    <p id="copy-ip-feedback" class="copy-feedback" role="status"></p>
     <details class="log">
       <summary>
         <span class="left">${ICON_LOG}Recent Activity</span>
@@ -346,6 +422,57 @@ $([ -n "${CARD_ROWS}" ] && printf '    <div class="card">\n      <ul class="list
 $([ "${SHOW_DASHBOARD}" = "1" ] && printf '      <a class="btn btn-primary" href="%s" target="_blank" rel="noopener">%sOpen Dashboard</a>\n' "${DASHBOARD_URL}" "${ICON_EXTERNAL}")
     </div>
   </main>
+EOF
+cat <<'HTML'
+  <script>
+    (function () {
+      var button = document.getElementById('copy-ip');
+      if (!button) return;
+      var ip = document.getElementById('netbird-ip').textContent.trim().split('/')[0];
+      var octets = ip.split('.');
+      if (octets.length !== 4 || octets.some(function (part) {
+        return !/^\d{1,3}$/.test(part) || Number(part) > 255;
+      })) return;
+
+      var feedback = document.getElementById('copy-ip-feedback');
+      button.disabled = false;
+      button.addEventListener('click', async function () {
+        button.disabled = true;
+        feedback.textContent = '';
+        var copied = false;
+        try {
+          if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(ip);
+            copied = true;
+          }
+        } catch (error) { /* Try the HTTP-compatible fallback below. */ }
+
+        var field;
+        if (!copied) {
+          field = document.createElement('input');
+          field.type = 'text';
+          field.readOnly = true;
+          field.value = ip;
+          field.setAttribute('aria-label', 'NetBird IP address');
+          feedback.appendChild(field);
+          field.select();
+          try { copied = document.execCommand('copy'); } catch (error) { /* Offer manual copy. */ }
+        }
+
+        button.disabled = false;
+        if (copied) {
+          button.textContent = 'Copied!';
+          feedback.textContent = 'IP address copied.';
+          button.focus();
+        } else {
+          button.textContent = 'Copy IP';
+          feedback.insertBefore(document.createTextNode('Copy this address:'), field);
+          field.focus();
+          field.select();
+        }
+      });
+    })();
+  </script>
 </body>
 </html>
-EOF
+HTML
