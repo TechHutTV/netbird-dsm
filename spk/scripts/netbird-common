@@ -1,0 +1,125 @@
+#!/bin/sh
+# Shared by preinst and start-stop-status. These checks run as the package user.
+
+package_error() {
+    echo "NetBird: $*" >&2
+    if [ -n "${SYNOPKG_TEMP_LOGFILE:-}" ]; then
+        printf 'NetBird: %s\n' "$*" >"${SYNOPKG_TEMP_LOGFILE}"
+    fi
+    return 1
+}
+
+check_manual_install() (
+    package_bin=$(readlink -f "${PKGDEST}/bin/netbird.bin")
+    package_wrapper=$(readlink -f "${PKGDEST}/bin/netbird")
+    package_var=$(readlink -f "${PKGVAR}")
+    conflicts=""
+
+    # The package itself installs this link. A different target or a regular
+    # file would collide with DSM's usr-local-linker, even if no daemon runs.
+    if [ -e /usr/local/bin/netbird ] || [ -L /usr/local/bin/netbird ]; then
+        cli_target=$(readlink -f /usr/local/bin/netbird)
+        cli_link=$(readlink /usr/local/bin/netbird)
+        if [ "$cli_link" != /var/packages/netbird/target/bin/netbird ] &&
+           { [ -z "$package_wrapper" ] || [ "$cli_target" != "$package_wrapper" ]; }; then
+            conflicts="${conflicts}
+  /usr/local/bin/netbird belongs to another installation"
+        fi
+    fi
+
+    for proc in /proc/[0-9]*; do
+        [ -r "$proc/comm" ] || continue
+        IFS= read -r name <"$proc/comm" || continue
+        case "$name" in netbird|netbird.bin) ;; *) continue ;; esac
+        # cmdline remains useful when the executable was deleted, or when
+        # DSM denies the package user access to a root process's exe link.
+        args=$(tr '\000' ' ' 2>/dev/null <"$proc/cmdline") || continue
+        case "$args" in *" service run "*) ;; *) continue ;; esac
+        exe=$(readlink "$proc/exe" 2>/dev/null)
+        exe=${exe% (deleted)}
+        command=${args%% *}
+        if { [ -n "$package_bin" ] && { [ "$exe" = "$package_bin" ] || [ "$command" = "$package_bin" ]; }; } ||
+           [ "$command" = "${PKGDEST}/bin/netbird.bin" ] ||
+           [ "$command" = /var/packages/netbird/target/bin/netbird.bin ]; then
+            # An administrator may use the package binary for a separate
+            # daemon. Only exempt an invocation using this package's config.
+            case "$args" in
+                *" --config ${PKGVAR}/config.json "*|*" --config ${package_var}/config.json "*|*" --config /var/packages/netbird/var/config.json "*)
+                    case "$args" in
+                        *" --daemon-addr unix://${PKGVAR}/netbird.sock "*|*" --daemon-addr unix://${package_var}/netbird.sock "*|*" --daemon-addr unix:///var/packages/netbird/var/netbird.sock "*) continue ;;
+                    esac
+                    ;;
+            esac
+        fi
+        conflicts="${conflicts}
+  another NetBird daemon is running (PID ${proc##*/})"
+    done
+
+    # The DSM unit is pkgctl-netbird.service, not the manual netbird.service.
+    # A disabled, inactive unit is a remnant, not an active conflict.
+    if command -v systemctl >/dev/null 2>&1; then
+        enabled=$(systemctl is-enabled netbird.service 2>/dev/null)
+        case "$enabled" in enabled|enabled-runtime) autostart=true ;; *) autostart=false ;; esac
+        if systemctl is-active --quiet netbird.service 2>/dev/null || "$autostart"; then
+            conflicts="${conflicts}
+  the manual netbird.service is active or enabled"
+        fi
+    fi
+
+    if [ -n "$conflicts" ]; then
+        package_error "A manual installation conflicts with this package:${conflicts}
+Stop its daemon and disable its startup service/task, then remove only its confirmed CLI binary/link. See the README section 'Replacing a manual installation'."
+        return 1
+    fi
+
+    # Configs, stale sockets, inactive units and wt0 alone do not prove that
+    # another installation is active. Never delete them or import implicitly.
+    if [ -d /etc/netbird ] || [ -d /var/lib/netbird ] || [ -S /var/run/netbird.sock ]; then
+        echo "NetBird: legacy state found; existing package config is preserved and fresh package state uses a new enrollment. See 'Replacing a manual installation' in the README." >&2
+    fi
+)
+
+prepare_package_config() (
+    if ! mkdir -p "${PKGVAR}" || [ ! -r "${PKGVAR}" ] ||
+       [ ! -w "${PKGVAR}" ] || [ ! -x "${PKGVAR}" ]; then
+        package_error "Cannot access the package state directory ${PKGVAR}. Restore package-user access before starting."
+        return 1
+    fi
+
+    if [ -e "${CONFIG_FILE}" ] || [ -L "${CONFIG_FILE}" ]; then
+        if [ ! -f "${CONFIG_FILE}" ] || [ ! -r "${CONFIG_FILE}" ] ||
+           [ ! -w "${CONFIG_FILE}" ] || [ ! -s "${CONFIG_FILE}" ]; then
+            package_error "Existing package config ${CONFIG_FILE} is empty, invalid as a file, or inaccessible. Restore it from backup or repair package-user permissions; it will not be replaced."
+            return 1
+        fi
+        return 0
+    fi
+
+    # Missing config alongside profile/state data is not a fresh installation.
+    # Allow only launcher diagnostics/runtime files and interrupted seed files.
+    for entry in "${PKGVAR}"/* "${PKGVAR}"/.[!.]* "${PKGVAR}"/..?*; do
+        [ -e "$entry" ] || [ -L "$entry" ] || continue
+        case "${entry##*/}" in
+            netbird.log|netbird.log.*|netbird.pid|netbird.sock|.config-init.*) continue ;;
+        esac
+        package_error "Package config is missing but state remains in ${PKGVAR}. Restore config.json from backup or follow the documented clean reset; refusing to create a new identity."
+        return 1
+    done
+
+    umask 077
+    seed=$(mktemp "${PKGVAR}/.config-init.XXXXXX") || {
+        package_error "Cannot create initial package configuration in ${PKGVAR}."
+        return 1
+    }
+    trap 'rm -f "$seed"' EXIT
+    trap 'exit 1' HUP INT TERM
+    # Match createNewConfig in the pinned NetBird release. {} takes the
+    # existing-config path upstream and enables its legacy SSH default.
+    printf '%s\n' '{"ServerSSHAllowed":false,"RemoteJobsAllowed":false,"WgPort":51820}' >"$seed" || return 1
+    # Hard-link a complete seed atomically without replacing any existing
+    # destination. -T also refuses a directory created concurrently.
+    if ! ln -T "$seed" "${CONFIG_FILE}" 2>/dev/null; then
+        package_error "Initial package config could not be installed without overwriting existing state. Check ${CONFIG_FILE} and retry."
+        return 1
+    fi
+)

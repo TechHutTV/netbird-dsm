@@ -76,6 +76,65 @@ DSM will offer updates automatically when a new version is published.
 >
 > DSM, SSH, and SMB access depend on service bindings and NetBird access policies. See [Reaching the NAS over NetBird](#reaching-the-nas-over-netbird) and the [hardware validation checklist](#rootless-networking-validation-on-dsm). Ordinary NAS applications do not gain automatic outbound access to the mesh in this mode.
 
+### Replacing a manual installation
+
+Stop a previous manual NetBird installation before installing this SPK. The
+installer and launcher check for another daemon, an active or enabled manual
+`netbird.service`, and a conflicting `/usr/local/bin/netbird`. The package's own
+CLI link and daemon are recognized during upgrades. Process inspection depends
+on DSM permissions; a root-only process may require an administrator to inspect
+it. A leftover config, stale socket, disabled service, or `wt0` interface alone
+does not prove that another daemon is running.
+
+Use a LAN connection independent of NetBird while retiring the old installation:
+
+1. **Identify and back up the manual installation.** As an administrator, inspect
+   `ps -ef`, `systemctl status netbird.service`, and
+   `readlink -f /usr/local/bin/netbird`. Save any enrollment/configuration you want
+   to retain from `/etc/netbird` and `/var/lib/netbird` in a protected backup.
+   Those files can contain private keys.
+2. **Stop the manual daemon and disable automatic startup.** For an installation
+   using the confirmed manual systemd unit, run:
+   ```bash
+   sudo systemctl disable --now netbird.service
+   ```
+   Disable any Task Scheduler task or custom startup script for that manual
+   installation too. If a daemon remains, inspect its command line and
+   `/proc/<PID>/exe` as root, then stop that specific process. A process can still
+   run after its executable has been deleted. Do not stop unrelated NetBird
+   processes by name indiscriminately.
+3. **Remove only confirmed manual program files.** Remove the old executable or
+   link at `/usr/local/bin/netbird` if it belongs to the manual installation.
+   Keep it if it points to `/var/packages/netbird/target/bin/netbird`. Remove the
+   confirmed manual `netbird.service` unit from its installed location (commonly
+   `/etc/systemd/system`, `/usr/local/lib/systemd/system`, `/usr/lib/systemd/system`,
+   or `/lib/systemd/system`), then run `sudo systemctl daemon-reload`.
+   The package's `pkgctl-netbird.service` is a different unit and must be kept.
+4. **Choose fresh enrollment or an explicit migration.** Fresh package state is
+   initialized independently of the old system config. Existing package state
+   is preserved on restart and upgrade. To retain the manual identity, an
+   administrator must explicitly copy the desired default config into the
+   stopped package's state directory with ownership `netbird:netbird` and mode
+   `0600`, before its first start. Do not overwrite an existing package identity.
+   Check that the old management server is still the intended destination;
+   additional named profiles need separate migration. Otherwise, enroll the
+   package normally using the CLI below.
+5. **Optionally remove remaining manual state.** After the manual daemon and its
+   startup mechanisms are stopped, and after backing up or migrating anything
+   needed, these commands discard the old manual state:
+   ```bash
+   sudo rm -rf /etc/netbird /var/lib/netbird
+   sudo rm -f /var/run/netbird.sock
+   ```
+   Do not remove `/var/packages/netbird` or its resolved data directory as part
+   of manual-install cleanup. Verify that the manual daemon and its host
+   interface do not return after startup tasks have been disabled.
+
+An inaccessible or empty package config, or a missing config alongside existing
+profile/state data, stops startup rather than silently generating a new identity.
+Restore the config from backup or repair its permissions. Use the documented
+[clean reset](#start-fresh-clean-reset) only when a new enrollment is intended.
+
 ## Configuration (CLI only)
 
 The DSM AppPortal page is read-only — there's no install wizard and no in-browser controls for connecting, disconnecting, or changing settings. SSH into the NAS and use the `netbird` CLI, which is symlinked to `/usr/local/bin/netbird`.
@@ -261,12 +320,14 @@ To wipe all NetBird state (keys, peer config, profile data) and re-enroll the de
 
 ```bash
 sudo synopkg stop netbird
-sudo rm -rf /var/packages/netbird/var/*
+sudo find /var/packages/netbird/var/ -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
 sudo synopkg start netbird
 sudo netbird up --setup-key YOUR_SETUP_KEY
 ```
 
-All NetBird state lives under `/var/packages/netbird/var` — nothing escapes to `/etc` or other system locations, so this is a complete reset.
+The trailing slash traverses DSM's `var` symlink, and `find` includes hidden state
+directories. This resets package state only. Legacy manual-install state is
+handled separately under [Replacing a manual installation](#replacing-a-manual-installation).
 
 ## SPK Structure
 
