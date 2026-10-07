@@ -290,10 +290,21 @@ The CGI uses **jq 1.5 or newer** to parse status; the tested DSM installation pr
 
 ### Package won't start
 
-Check the log file:
+Package Center reports a short explanation for startup failures, including
+inaccessible state/log files and common daemon errors. The same message is
+printed when starting the script over SSH. Configuration values and raw daemon
+output are kept out of the Package Center message.
+
+Check the detailed log file and the current attempt's diagnostics in the system journal:
 ```bash
-cat /var/packages/netbird/var/netbird.log
+sudo tail -n 50 /var/packages/netbird/var/netbird.log
+sudo journalctl -t netbird-pkg -n 50
 ```
+
+Each launch adds a startup marker to the package log. Failed starts forward only
+that attempt's last 20 lines to the journal, so retries do not replay earlier
+errors. If the log cannot be opened, the explanation still goes to Package
+Center, stderr and the system journal.
 
 ### `Interface type: Userspace` in `netbird status`
 

@@ -2,9 +2,15 @@
 # Shared by preinst and start-stop-status. These checks run as the package user.
 
 package_error() {
-    echo "NetBird: $*" >&2
+    printf 'NetBird: %s\n' "$*" >&2
+    printf 'NetBird: %s\n' "$*" | logger -t netbird-pkg 2>/dev/null || :
+    # Reporting must still work if either destination is inaccessible. The
+    # subshells contain shell redirection errors (including on DSM's ash).
     if [ -n "${SYNOPKG_TEMP_LOGFILE:-}" ]; then
-        printf 'NetBird: %s\n' "$*" >"${SYNOPKG_TEMP_LOGFILE}"
+        (printf 'NetBird: %s\n' "$*" >"${SYNOPKG_TEMP_LOGFILE}") 2>/dev/null || :
+    fi
+    if [ -n "${LOG_FILE:-}" ] && { [ ! -e "$LOG_FILE" ] || [ -f "$LOG_FILE" ]; }; then
+        (umask 077; printf 'NetBird: %s\n' "$*" >>"$LOG_FILE") 2>/dev/null || :
     fi
     return 1
 }
