@@ -1,5 +1,5 @@
 #!/bin/sh
-# NetBird DSM AppPortal — read-only connection status page.
+# NetBird DSM AppPortal — connection status and administrator controls.
 # Served at /webman/3rdparty/netbird/index.cgi behind DSM auth.
 
 # AppPortal launcher privileges do not protect direct CGI requests. Authenticate
@@ -74,13 +74,25 @@ ICON_LOG='<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor
 ICON_CHEV='<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>'
 ICON_EXTERNAL='<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>'
 
+ICON_COPY='<svg class="icon icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>'
+ICON_CHECK='<svg class="icon icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>'
+
 # Keep CLI failure distinct from a disconnected or unconfigured daemon. Require
 # exactly one JSON object with an explicit state before rendering any fields.
 DAEMON_STATE=""
 STATUS_ERROR=""
+read_status() {
+    # Debug-bundle collection can briefly hold the daemon's status lock. Keep
+    # an initial page load bounded while the separate job endpoint reports progress.
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 5 "${NETBIRD}" status --json
+    else
+        "${NETBIRD}" status --json
+    fi
+}
 if ! command -v jq >/dev/null 2>&1; then
     STATUS_ERROR="The status page requires jq to read NetBird status."
-elif ! STATUS_JSON=$("${NETBIRD}" status --json 2>/dev/null); then
+elif ! STATUS_JSON=$(read_status 2>/dev/null); then
     STATUS_ERROR="Unable to read NetBird status. The daemon may not be running."
 elif ! DAEMON_STATE=$(printf '%s' "${STATUS_JSON}" | jq -ers '
     if length == 1 and (.[0] | type) == "object" then
@@ -114,13 +126,13 @@ else
             STATUS_LABEL="Not Configured"
             DOT_CLASS="bg-yellow"
             STATE_CLASS="state-needslogin"
-            HINT='Run <code>sudo netbird up --setup-key &hellip;</code> via SSH to enroll this device.'
+            HINT='Enroll this NAS with a setup key from your NetBird dashboard.'
             ;;
         LoginFailed|SessionExpired)
             STATUS_LABEL="Login Required"
             DOT_CLASS="bg-yellow"
             STATE_CLASS="state-needslogin"
-            HINT='Run <code>sudo netbird up</code> via SSH to sign in again.'
+            HINT='Use a setup key to sign in again, or use the CLI for interactive login.'
             ;;
         Connecting)
             STATUS_LABEL="Connecting"
@@ -192,7 +204,7 @@ if [ "${SHOW_DASHBOARD}" = 1 ]; then
           <span class="label">${ICON_PIN}NetBird IP</span>
           <span class="ip-value">
             <span id="netbird-ip" class="value">${NB_IP}</span>
-            <button id="copy-ip" class="btn btn-copy" type="button" disabled>Copy IP</button>
+            <button id="copy-ip" class="btn btn-copy" type="button" aria-label="Copy IP address" title="Copy IP address" disabled>${ICON_COPY}${ICON_CHECK}</button>
           </span>
         </li>
         <li>
@@ -223,6 +235,12 @@ ROWS
 )
 fi
 
+CONTROL_STATE="Unavailable"
+case "${DAEMON_STATE}" in
+    NeedsLogin|LoginFailed|SessionExpired|Connecting|Connected|Idle)
+        [ -z "${STATUS_ERROR}" ] && CONTROL_STATE="${DAEMON_STATE}" ;;
+esac
+
 # Recent log lines (HTML-escaped, then INFO/WARN/ERROR colorized).
 LOG_HTML=""
 if [ -r "${LOG_FILE}" ]; then
@@ -238,6 +256,9 @@ fi
 echo "Content-Type: text/html; charset=utf-8"
 echo "Cache-Control: no-store"
 echo "Referrer-Policy: no-referrer"
+echo "X-Content-Type-Options: nosniff"
+echo "X-Frame-Options: SAMEORIGIN"
+echo "Content-Security-Policy: frame-ancestors 'self'; base-uri 'none'; form-action 'self'"
 echo ""
 
 cat <<EOF
@@ -245,7 +266,7 @@ cat <<EOF
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="refresh" content="10">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>NetBird Client - ${NAS_HOSTNAME}</title>
   <link rel="icon" type="image/svg+xml" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 31 23"><path d="M21.46 0.52c-3.65 0.33-5.46 2.43-6.15 3.49L4.66 22.47h12.86L30.19 0.52H21.46z" fill="%23F68330"/><path d="M17.53 22.47L0 3.89s19.82-5.33 21.75 11.28l-4.22 7.3z" fill="%23F68330"/><path d="M14.92 4.71L9.55 14.02l7.97 8.45 4.22-7.32C21.07 9.45 18.29 6.33 14.92 4.7" fill="%23F05252"/></svg>'>
   <style>
@@ -274,7 +295,7 @@ cat <<EOF
       -webkit-font-smoothing: antialiased;
       letter-spacing: 0.01em;
     }
-    main { max-width: 560px; margin: 0 auto; }
+    main { max-width: 760px; margin: 0 auto; }
     .brand {
       display: flex; align-items: center; gap: 0.625rem;
       margin-bottom: 1.75rem;
@@ -283,14 +304,14 @@ cat <<EOF
     }
     .brand svg { height: 18px; width: auto; }
     .header {
-      display: flex; align-items: center; gap: 0.75rem;
+      display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem;
       font-size: 0.95rem; font-weight: 500; color: var(--text-dim);
     }
     .header .state-connected    { color: var(--green); }
     .header .state-needslogin   { color: var(--yellow); }
     .header .state-disconnected { color: var(--red); }
     .header .sep { color: var(--border-strong); }
-    .header .meta { color: var(--text-soft); }
+    .header .meta { color: var(--text-soft); overflow-wrap: anywhere; min-width: 0; }
     .dot {
       width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0;
       animation: pulse 2.4s ease-in-out infinite;
@@ -386,10 +407,79 @@ cat <<EOF
     .btn:hover { background: #25282d; color: var(--text); }
     .btn:focus-visible { outline: 2px solid var(--netbird); outline-offset: 2px; }
     .btn:disabled { opacity: 0.5; cursor: default; }
-    .btn-copy { padding: 0.25rem 0.5rem; font-family: inherit; font-size: 0.75rem; flex-shrink: 0; }
+    .btn-copy { padding: 0.375rem; flex-shrink: 0; border-color: transparent; background: transparent; }
     .btn .icon { width: 14px; height: 14px; color: currentColor; }
+    .btn-copy .icon-check, .btn-copy[data-copied="true"] .icon-copy { display: none; }
+    .btn-copy[data-copied="true"] .icon-check { display: block; color: var(--green); }
     .btn-primary { background: var(--netbird); border-color: var(--netbird); color: #fff; }
     .btn-primary:hover { background: #f46d1b; border-color: #f46d1b; color: #fff; }
+    [hidden] { display: none !important; }
+    .controls { margin-top: 1.25rem; }
+    .control-actions { display: flex; gap: 0.625rem; }
+    .enrollment { padding: 1.25rem; margin-top: 0; }
+    .enrollment h2 { margin: 0 0 0.5rem; font-size: 1rem; font-weight: 600; }
+    .enrollment p, .control-message, .control-note {
+      font-size: 0.8125rem; line-height: 1.55; color: var(--text-soft);
+    }
+    .enrollment p { margin: 0 0 1.25rem; }
+    .enrollment fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+    .enrollment label { display: block; margin: 1rem 0 0.4rem; font-size: 0.8125rem; }
+    .enrollment input:not([type="radio"]) {
+      width: 100%; padding: 0.625rem 0.75rem; border-radius: 6px;
+      border: 1px solid var(--border-strong); background: var(--bg);
+      color: var(--text); font: inherit; font-size: 0.875rem;
+    }
+    .enrollment input:not([type="radio"]):focus { outline: 2px solid var(--netbird); outline-offset: 2px; }
+    .server-choice legend { padding: 0; margin-bottom: 0.4rem; font-size: 0.8125rem; }
+    .server-options { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    .server-options label { position: relative; margin: 0; cursor: pointer; }
+    .server-options input {
+      position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0;
+    }
+    .server-options span {
+      display: block; padding: 0.75rem 0.5rem; border-radius: 6px; text-align: center;
+      border: 1px solid var(--border-strong); color: var(--text-soft); background: var(--bg);
+    }
+    .server-options input:checked + span {
+      border-color: var(--netbird); color: var(--netbird); background: #30241c;
+    }
+    .server-options input:focus-visible + span { outline: 2px solid var(--netbird); outline-offset: 2px; }
+    .server-options input:disabled + span { opacity: 0.5; cursor: default; }
+    .enrollment .btn { margin-top: 1.25rem; }
+    .control-message { margin: 0.75rem 0 0; }
+    .control-message:empty { display: none; }
+    .control-message[data-error="true"] { color: var(--red); }
+    .control-note { color: var(--text-dim); margin: 0.625rem 0 0; }
+    .enrollment small { display: block; color: var(--text-dim); font-size: 0.75rem; margin-top: 0.4rem; line-height: 1.5; }
+    .notice { padding: 0.875rem 1rem; border: 1px solid var(--yellow); border-radius: 8px; color: var(--yellow); font-size: 0.8125rem; line-height: 1.5; margin-bottom: 1.25rem; }
+    .health { margin-top: 1.25rem; padding: 1rem; }
+    .health h2 { margin: 0 0 0.875rem; font-size: 0.875rem; font-weight: 600; }
+    .health-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; }
+    .health-grid span { display: block; font-size: 0.75rem; color: var(--text-dim); margin-bottom: 0.35rem; }
+    .health-grid strong { font-size: 0.8125rem; font-weight: 500; }
+    [data-health="good"] { color: var(--green); }
+    [data-health="bad"] { color: var(--yellow); }
+    .detail-note { font-size: 0.75rem; color: var(--text-dim); line-height: 1.5; margin: 0.75rem 0 0; }
+    .peer-scroll { overflow-x: auto; padding: 0 1rem 1rem; }
+    .peer-table { width: 100%; min-width: 650px; border-collapse: collapse; font-size: 0.75rem; }
+    .peer-table th, .peer-table td { text-align: left; padding: 0.65rem 0.6rem; border-bottom: 1px solid var(--row-border); vertical-align: top; }
+    .peer-table th { color: var(--text-soft); font-weight: 500; }
+    .peer-table td { overflow-wrap: anywhere; max-width: 190px; }
+    .peer-table small { display: block; color: var(--text-dim); margin-top: 0.3rem; }
+    .peer-empty { padding: 0 1rem 1rem; margin: 0; color: var(--text-dim); font-size: 0.8125rem; }
+    .troubleshooting { padding: 0 1rem 1rem; }
+    .troubleshooting h3 { margin: 1.25rem 0 0.625rem; font-size: 0.875rem; font-weight: 500; }
+    .troubleshooting fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
+    .tool-row { display: flex; flex-wrap: wrap; gap: 0.625rem; align-items: center; }
+    .log-tools { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
+    .log-tools select, .log-tools input { min-width: 0; padding: 0.5rem; color: var(--text); background: var(--bg); border: 1px solid var(--border-strong); border-radius: 6px; font: inherit; font-size: 0.75rem; }
+    .log-tools input { flex: 1; width: 40%; }
+    .troubleshooting pre { margin: 0; border: 1px solid var(--border); border-radius: 6px; }
+    .bundle-destination { display: block; font-size: 0.8125rem; margin: 0.75rem 0; }
+    .bundle-destination input { accent-color: var(--netbird); margin-right: 0.4rem; }
+    .support-result { margin-top: 0.875rem; padding: 0.875rem; border: 1px solid var(--border-strong); border-radius: 6px; }
+    .support-result label { display: block; font-size: 0.75rem; color: var(--text-dim); margin-bottom: 0.5rem; }
+    .support-code { font-family: ui-monospace, monospace; font-size: 0.75rem; overflow-wrap: anywhere; user-select: all; }
   </style>
 </head>
 <body>
@@ -402,6 +492,7 @@ cat <<EOF
       </svg>
       NetBird
     </div>
+    <div id="status-content" data-state="${CONTROL_STATE}">
     <div class="header">
       <span class="dot ${DOT_CLASS}"></span>
       <span class="${STATE_CLASS}">${STATUS_LABEL}</span>
@@ -410,69 +501,103 @@ $([ -n "${META}" ] && printf '      <span class="sep">·</span><span class="meta
 $([ -n "${HINT}" ] && printf '    <p class="hint">%s</p>\n' "${HINT}")
 $([ -n "${CARD_ROWS}" ] && printf '    <div class="card">\n      <ul class="list">\n%s\n      </ul>\n    </div>\n' "${CARD_ROWS}")
     <p id="copy-ip-feedback" class="copy-feedback" role="status"></p>
-    <details class="log">
+    </div>
+    <section class="controls" aria-label="Connection controls">
+      <p id="controls-unavailable" class="notice" role="status" hidden></p>
+      <div class="control-actions">
+        <button id="connect" class="btn btn-primary" type="button" hidden disabled>Connect</button>
+        <button id="disconnect" class="btn" type="button" hidden disabled>Disconnect</button>
+      </div>
+      <p id="disconnect-note" class="control-note" hidden>Disconnecting keeps your enrollment and leaves the service running.</p>
+      <form id="enroll-form" class="card enrollment" autocomplete="off" hidden>
+        <h2>Connect this NAS</h2>
+        <p>Use a setup key from your NetBird dashboard to join your network.</p>
+        <fieldset id="enroll-fields" disabled>
+          <fieldset class="server-choice">
+            <legend>Management server</legend>
+            <div class="server-options">
+              <label><input id="server-cloud" type="radio" name="server-kind" value="cloud" checked><span>NetBird Cloud</span></label>
+              <label><input id="server-self-hosted" type="radio" name="server-kind" value="self-hosted"><span>Self-hosted</span></label>
+            </div>
+          </fieldset>
+          <div id="management-field" hidden>
+            <label for="management-url">Management URL</label>
+            <input id="management-url" type="url" placeholder="https://netbird.example.com" maxlength="2048" spellcheck="false" autocomplete="off" disabled>
+          </div>
+          <label for="setup-key">Setup key</label>
+          <input id="setup-key" type="password" required minlength="16" maxlength="256" autocomplete="off" spellcheck="false" autocapitalize="none" aria-describedby="setup-key-hint">
+          <small id="setup-key-hint">The key is sent only for enrollment and is not saved by this page.</small>
+          <button id="enroll" class="btn btn-primary" type="submit">Enroll and connect</button>
+        </fieldset>
+      </form>
+      <p id="control-message" class="control-message" role="status" aria-live="polite"></p>
+      <noscript><p class="control-note">Enable JavaScript to use connection controls and refresh status, or use the NetBird CLI.</p></noscript>
+    </section>
+    <section class="card health" aria-labelledby="health-title">
+      <h2 id="health-title">Connection health</h2>
+      <div class="health-grid">
+        <div><span>Management</span><strong id="health-management">Checking…</strong></div>
+        <div><span>Signal</span><strong id="health-signal">Checking…</strong></div>
+        <div><span>Relays</span><strong id="health-relays">Checking…</strong></div>
+      </div>
+      <p id="details-message" class="detail-note" role="status">Loading connection details…</p>
+    </section>
+    <details id="peers" class="log">
+      <summary><span class="left">${ICON_PEERS}Peers <span id="peer-count"></span></span>${ICON_CHEV}</summary>
+      <p id="peer-empty" class="peer-empty">Loading peer details…</p>
+      <div id="peer-scroll" class="peer-scroll" hidden>
+        <table class="peer-table">
+          <thead><tr><th scope="col">Peer / IP</th><th scope="col">Connection</th><th scope="col">Latency</th><th scope="col">Last handshake</th><th scope="col">Received / sent</th></tr></thead>
+          <tbody id="peer-rows"></tbody>
+        </table>
+      </div>
+    </details>
+    <details id="activity" class="log">
       <summary>
-        <span class="left">${ICON_LOG}Recent Activity</span>
+        <span class="left">${ICON_LOG}Troubleshooting</span>
         ${ICON_CHEV}
       </summary>
-      <pre>${LOG_HTML}</pre>
+      <div class="troubleshooting">
+        <h3>Recent logs</h3>
+        <div class="log-tools">
+          <select id="log-filter" aria-label="Filter logs by severity"><option value="all">All levels</option><option value="warnings">Warnings and errors</option><option value="errors">Errors only</option></select>
+          <input id="log-search" type="search" aria-label="Search recent logs" placeholder="Search logs" maxlength="100">
+        </div>
+        <pre id="recent-logs">${LOG_HTML}</pre>
+        <p id="log-count" class="detail-note">Recent daemon output. Filtered locally in your browser.</p>
+        <h3>Temporary debug logging</h3>
+        <p id="debug-state" class="detail-note">Checking log level…</p>
+        <fieldset id="diagnostics-fields" disabled>
+          <div class="tool-row">
+            <button id="debug-start" class="btn" type="button">Enable debug for 10 minutes</button>
+            <button id="debug-stop" class="btn" type="button" hidden>Stop debug logging</button>
+          </div>
+          <h3>Debug bundle</h3>
+          <p class="detail-note">Includes logs, connection status, and system information with NetBird’s strict anonymization enabled. Review downloaded bundles before sharing them.</p>
+          <label class="bundle-destination"><input type="radio" name="bundle-destination" value="support" checked>Upload to NetBird support and get a support code</label>
+          <label class="bundle-destination"><input type="radio" name="bundle-destination" value="local">Download only</label>
+          <p id="bundle-destination-note" class="detail-note">The bundle will be uploaded to NetBird’s support service, including for self-hosted networks.</p>
+          <button id="bundle-create" class="btn" type="button">Create and upload bundle</button>
+        </fieldset>
+        <p id="diagnostic-message" class="control-message" role="status"></p>
+        <p id="bundle-message" class="detail-note" role="status"></p>
+        <div id="support-result" class="support-result" hidden>
+          <label for="support-code">Support code — send this with your report</label>
+          <output id="support-code" class="support-code"></output>
+          <button id="copy-support-code" class="btn btn-copy" type="button" aria-label="Copy support code" title="Copy support code">${ICON_COPY}${ICON_CHECK}</button>
+          <p id="support-copy-feedback" class="detail-note" role="status"></p>
+        </div>
+        <button id="bundle-download" class="btn" type="button" hidden disabled>Download debug bundle</button>
+      </div>
     </details>
-    <div class="actions">
+    <div id="external-links" class="actions">
       <a class="btn" href="${DOCS_URL}" target="_blank" rel="noopener">${ICON_EXTERNAL}Open Docs</a>
 $([ "${SHOW_DASHBOARD}" = "1" ] && printf '      <a class="btn btn-primary" href="%s" target="_blank" rel="noopener">%sOpen Dashboard</a>\n' "${DASHBOARD_URL}" "${ICON_EXTERNAL}")
     </div>
   </main>
 EOF
 cat <<'HTML'
-  <script>
-    (function () {
-      var button = document.getElementById('copy-ip');
-      if (!button) return;
-      var ip = document.getElementById('netbird-ip').textContent.trim().split('/')[0];
-      var octets = ip.split('.');
-      if (octets.length !== 4 || octets.some(function (part) {
-        return !/^\d{1,3}$/.test(part) || Number(part) > 255;
-      })) return;
-
-      var feedback = document.getElementById('copy-ip-feedback');
-      button.disabled = false;
-      button.addEventListener('click', async function () {
-        button.disabled = true;
-        feedback.textContent = '';
-        var copied = false;
-        try {
-          if (navigator.clipboard && window.isSecureContext) {
-            await navigator.clipboard.writeText(ip);
-            copied = true;
-          }
-        } catch (error) { /* Try the HTTP-compatible fallback below. */ }
-
-        var field;
-        if (!copied) {
-          field = document.createElement('input');
-          field.type = 'text';
-          field.readOnly = true;
-          field.value = ip;
-          field.setAttribute('aria-label', 'NetBird IP address');
-          feedback.appendChild(field);
-          field.select();
-          try { copied = document.execCommand('copy'); } catch (error) { /* Offer manual copy. */ }
-        }
-
-        button.disabled = false;
-        if (copied) {
-          button.textContent = 'Copied!';
-          feedback.textContent = 'IP address copied.';
-          button.focus();
-        } else {
-          button.textContent = 'Copy IP';
-          feedback.insertBefore(document.createTextNode('Copy this address:'), field);
-          field.focus();
-          field.select();
-        }
-      });
-    })();
-  </script>
+  <script src="controls.js?v=6" defer></script>
 </body>
 </html>
 HTML

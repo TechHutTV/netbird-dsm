@@ -3,6 +3,6 @@
 # Ensure binary, CLI wrapper, and the AppPortal CGI are executable (DSM may
 # strip the execute bit on package-owned files).
 chmod +x "${SYNOPKG_PKGDEST}/bin/netbird.bin" "${SYNOPKG_PKGDEST}/bin/netbird"
-chmod +x "${SYNOPKG_PKGDEST}/ui/index.cgi"
+chmod +x "${SYNOPKG_PKGDEST}/ui/index.cgi" "${SYNOPKG_PKGDEST}/ui/action.cgi" "${SYNOPKG_PKGDEST}/ui/details.cgi"
 
 exit 0

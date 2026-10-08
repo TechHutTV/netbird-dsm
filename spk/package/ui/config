@@ -3,7 +3,7 @@
     "com.netbird.netbird": {
       "type": "url",
       "title": "NetBird",
-      "desc": "NetBird VPN connection status",
+      "desc": "NetBird VPN status and connection controls",
       "icon": "images/icon_{0}.png",
       "url": "/webman/3rdparty/netbird/index.cgi",
       "allUsers": false,
