@@ -5,8 +5,11 @@
 #   make build package NETBIRD_SRC=/path/to/src                 # build from source
 #   make clean                                                 # remove artifacts
 
-# Shared default for local builds and CI. Override for packaging revisions.
+# VERSION always selects the upstream binary. Package revisions are separate.
 VERSION ?= $(shell cat VERSION)
+PACKAGE_VERSION ?= $(VERSION)-0
+CHECKSUMS_FILE ?= SHA256SUMS
+TAR ?= tar
 
 # Architecture (defaults: x86_64 / amd64). NETBIRD_ARCH is auto-derived from
 # SYNOLOGY_ARCH; override either explicitly if needed.
@@ -17,7 +20,7 @@ else
 NETBIRD_ARCH ?= amd64
 endif
 
-SPK_NAME := netbird_$(VERSION)_synology_$(NETBIRD_ARCH).spk
+SPK_NAME := netbird_$(PACKAGE_VERSION)_synology_$(NETBIRD_ARCH).spk
 
 # For building from source (optional)
 NETBIRD_SRC ?= .
@@ -25,6 +28,7 @@ GOFLAGS := CGO_ENABLED=0 GOOS=linux GOARCH=$(NETBIRD_ARCH)
 
 # GitHub release URL for downloading pre-built binary
 RELEASE_URL := https://github.com/netbirdio/netbird/releases/download/v$(VERSION)/netbird_$(VERSION)_linux_$(NETBIRD_ARCH).tar.gz
+RELEASE_FILE := netbird_$(VERSION)_linux_$(NETBIRD_ARCH).tar.gz
 
 # Directories
 SPK_DIR := spk
@@ -33,44 +37,49 @@ BIN_DIR := $(PKG_DIR)/bin
 BUILD_DIR := build
 WRAPPER_SRC := $(SPK_DIR)/wrapper/netbird
 
-.PHONY: all build download package clean check-binary check-version test help
+.PHONY: all build download package clean check-binary check-version check-package-version test help
 
 all: package
 
-# Verify VERSION is set before targets that need it
 check-version:
-	@test -n "$(VERSION)" || { \
-		echo "ERROR: VERSION is required."; \
-		echo "Example: make download package VERSION=0.80.0"; \
-		exit 1; \
-	}
+	@python3 -B scripts/version.py check --upstream "$(VERSION)"
+	@case "$(SYNOLOGY_ARCH):$(NETBIRD_ARCH)" in x86_64:amd64|aarch64:arm64) ;; *) echo "ERROR: architecture must be x86_64:amd64 or aarch64:arm64"; exit 1;; esac
+
+check-package-version: check-version
+	@python3 -B scripts/version.py check --upstream "$(VERSION)" --package "$(PACKAGE_VERSION)"
 
 # Download pre-built NetBird binary from GitHub releases
 download: check-version
 	@echo "Downloading NetBird v$(VERSION) for linux/$(NETBIRD_ARCH)..."
 	@mkdir -p $(BIN_DIR) $(BUILD_DIR)
-	curl -fSL "$(RELEASE_URL)" -o $(BUILD_DIR)/netbird.tar.gz
-	tar -xzf $(BUILD_DIR)/netbird.tar.gz -C $(BUILD_DIR)/
+	@awk '$$2 == "$(RELEASE_FILE)" { print }' "$(CHECKSUMS_FILE)" > $(BUILD_DIR)/netbird.checksum
+	@test -s $(BUILD_DIR)/netbird.checksum || { echo "ERROR: no pinned checksum for $(RELEASE_FILE) in $(CHECKSUMS_FILE)"; exit 1; }
+	curl -fSL "$(RELEASE_URL)" -o "$(BUILD_DIR)/$(RELEASE_FILE)"
+	cd $(BUILD_DIR) && shasum -a 256 -c netbird.checksum
+	$(TAR) -xzf "$(BUILD_DIR)/$(RELEASE_FILE)" -C $(BUILD_DIR)/ netbird
 	cp $(BUILD_DIR)/netbird $(BIN_DIR)/netbird.bin
 	chmod +x $(BIN_DIR)/netbird.bin
+	@printf '%s\n' "$(VERSION) linux/$(NETBIRD_ARCH)" > $(BUILD_DIR)/binary-version
 	@echo "Binary downloaded to $(BIN_DIR)/netbird.bin"
 
 # Build NetBird from source (requires the toolchain in upstream's go.mod)
 build: check-version
 	@echo "Building NetBird v$(VERSION) from source..."
-	@mkdir -p $(BIN_DIR)
+	@mkdir -p $(BIN_DIR) $(BUILD_DIR)
 	cd $(NETBIRD_SRC) && $(GOFLAGS) go build \
 		-ldflags "-s -w -X github.com/netbirdio/netbird/version.version=$(VERSION)" \
 		-o $(abspath $(BIN_DIR))/netbird.bin \
 		./client/
+	@printf '%s\n' "$(VERSION) linux/$(NETBIRD_ARCH)" > $(BUILD_DIR)/binary-version
 	@echo "Binary built at $(BIN_DIR)/netbird.bin"
 
 # Verify binary exists before packaging
 check-binary:
 	@test -f $(BIN_DIR)/netbird.bin || { echo "Error: $(BIN_DIR)/netbird.bin not found. Run 'make download' or 'make build' first."; exit 1; }
+	@test "$$(cat $(BUILD_DIR)/binary-version 2>/dev/null)" = "$(VERSION) linux/$(NETBIRD_ARCH)" || { echo "ERROR: binary version/architecture differs; run 'make download' or 'make build' again."; exit 1; }
 
 # Build the SPK package
-package: check-version check-binary
+package: check-package-version check-binary
 	@echo "Building SPK package..."
 	@mkdir -p $(BUILD_DIR)
 
@@ -81,14 +90,14 @@ package: check-version check-binary
 
 	# Create package.tgz from package/ contents
 	@echo "Creating package.tgz..."
-	cd $(PKG_DIR) && tar -czf ../../$(BUILD_DIR)/package.tgz --owner=0 --group=0 *
+	cd $(PKG_DIR) && $(TAR) -czf ../../$(BUILD_DIR)/package.tgz --owner=0 --group=0 *
 
 	# Calculate extract size (KB)
 	$(eval EXTRACTSIZE := $(shell du -sk $(PKG_DIR) | cut -f1))
 
 	# Generate INFO file
 	@echo "Generating INFO..."
-	sh $(SPK_DIR)/INFO.sh "$(VERSION)" "$(EXTRACTSIZE)" "$(SYNOLOGY_ARCH)" > $(BUILD_DIR)/INFO
+	sh $(SPK_DIR)/INFO.sh "$(PACKAGE_VERSION)" "$(EXTRACTSIZE)" "$(SYNOLOGY_ARCH)" > $(BUILD_DIR)/INFO
 
 	# Assemble SPK
 	@echo "Assembling SPK..."
@@ -101,12 +110,12 @@ package: check-version check-binary
 	cp -r $(SPK_DIR)/scripts $(BUILD_DIR)/spk_staging/scripts
 	cp -r $(SPK_DIR)/conf $(BUILD_DIR)/spk_staging/conf
 
-	cd $(BUILD_DIR)/spk_staging && tar -cf ../../$(SPK_NAME) --owner=0 --group=0 *
+	cd $(BUILD_DIR)/spk_staging && $(TAR) -cf ../../$(SPK_NAME) --owner=0 --group=0 *
 
 	@rm -rf $(BUILD_DIR)/spk_staging
 	@echo ""
 	@echo "SPK package built: $(SPK_NAME)"
-	@echo "  Version:  $(VERSION)"
+	@echo "  Version:  $(PACKAGE_VERSION) (NetBird $(VERSION))"
 	@echo "  Arch:     $(SYNOLOGY_ARCH) (netbird: $(NETBIRD_ARCH))"
 	@echo "  Size:     $$(du -sh $(SPK_NAME) | cut -f1)"
 
@@ -135,6 +144,9 @@ help:
 	@echo ""
 	@echo "Variables:"
 	@echo "  VERSION        - NetBird version (default: VERSION file; currently $(VERSION))"
+	@echo "  PACKAGE_VERSION - DSM version (default: $(PACKAGE_VERSION); revision 0 is for development)"
+	@echo "  CHECKSUMS_FILE - Pinned upstream archive checksums (default: SHA256SUMS)"
+	@echo "  TAR            - GNU tar command (default: tar; use gtar on macOS)"
 	@echo "  SYNOLOGY_ARCH  - Synology arch token (default: x86_64; e.g. aarch64)"
 	@echo "  NETBIRD_ARCH   - NetBird arch token (auto from SYNOLOGY_ARCH; amd64/arm64)"
 	@echo "  NETBIRD_SRC    - Path to NetBird source for 'make build' (default: .)"

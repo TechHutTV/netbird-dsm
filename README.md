@@ -11,12 +11,12 @@ A Synology DSM 7.0+ package (.spk) for the [NetBird](https://netbird.io/) VPN cl
 ## Prerequisites
 
 - A Synology NAS running **DSM 7.0** or later (x86_64 or aarch64)
-- `curl`, `tar`, `make` (for building the package)
+- Python 3, `curl`, GNU `tar`, `make`, and `shasum` (for building the package; on macOS install GNU tar and pass `TAR=gtar`)
 - The Go toolchain required by the selected NetBird release's `go.mod` (only if building from source)
 
 ## Quick Start (Pre-built Binary)
 
-Local builds and GitHub Actions default to **NetBird 0.80.0**, pinned in the [`VERSION`](VERSION) file. The native SPK uses the standard NetBird binary with the same networking settings as upstream's rootless image; Docker is not required.
+Local builds and GitHub Actions use the upstream NetBird version pinned in [`VERSION`](VERSION). The native SPK uses the standard NetBird binary with the same networking settings as upstream's rootless image; Docker is not required.
 
 ```bash
 # x86_64 (Intel/AMD — default)
@@ -26,15 +26,15 @@ make download package
 make download package SYNOLOGY_ARCH=aarch64
 ```
 
-This produces `netbird_<version>_synology_<amd64|arm64>.spk` in the repo root.
+This produces `netbird_<version>-0_synology_<amd64|arm64>.spk` in the repo root. Revision `0` identifies a local or PR build; published releases use an automatically assigned positive revision. Downloads must match the pinned checksums in [`SHA256SUMS`](SHA256SUMS).
 
-To explicitly select another [NetBird release](https://github.com/netbirdio/netbird/releases), pass `VERSION=<version>` without the leading `v`. The release workflow accepts an override too; leaving it blank uses the pinned version.
+To select another stable [NetBird release](https://github.com/netbirdio/netbird/releases), run `python3 -B scripts/update-netbird.py --version <version>` with an authenticated GitHub CLI. This verifies both upstream archives and updates `VERSION` and `SHA256SUMS` together. For a temporary local override, pass `VERSION=<version>` without the leading `v` and `CHECKSUMS_FILE=<matching-checksum-file>`.
 
 ## Building from Source
 
 ```bash
 git clone https://github.com/netbirdio/netbird.git /path/to/netbird
-git -C /path/to/netbird checkout v0.80.0
+git -C /path/to/netbird checkout "v$(cat VERSION)"
 
 # x86_64
 make build package NETBIRD_SRC=/path/to/netbird
@@ -466,18 +466,45 @@ Build variables:
 
 | Variable        | Default          | Notes                                                       |
 |-----------------|------------------|-------------------------------------------------------------|
-| `VERSION`       | `VERSION` file (`0.80.0`) | NetBird upstream version, or package revision when running `make package` separately. |
+| `VERSION`       | `VERSION` file | Upstream NetBird version only, without `v` or a package revision. |
+| `PACKAGE_VERSION` | `<VERSION>-0` | DSM version, such as `0.80.0-5`. The upstream portion must match `VERSION`. |
+| `CHECKSUMS_FILE` | `SHA256SUMS` | Pinned SHA256 digests for both upstream archives. |
+| `TAR` | `tar` | GNU tar executable. Use `gtar` on macOS. |
 | `SYNOLOGY_ARCH` | `x86_64`         | Synology arch token written into INFO. Also accepts `aarch64`. |
-| `NETBIRD_ARCH`  | auto from above  | NetBird release arch (`amd64`/`arm64`). Override only if needed. |
+| `NETBIRD_ARCH`  | auto from above  | NetBird release arch (`amd64`/`arm64`); must match `SYNOLOGY_ARCH`. |
 | `NETBIRD_SRC`   | `.`              | Path to NetBird source (only for `make build`)              |
 
 ### Rootless implementation and privileged variants
 
 The standard upstream binary supports rootless networking; no alternate executable or container is needed. The daemon environment follows [upstream's versioned rootless Dockerfile](https://github.com/netbirdio/netbird/blob/v0.80.0/client/Dockerfile-rootless). The [upstream forwarder](https://github.com/netbirdio/netbird/blob/v0.80.0/client/firewall/uspfilter/forwarder/forwarder.go) maps the peer's NetBird destination address to host loopback. Keep these settings on the daemon launch, since exporting them only for a CLI command does not reconfigure a running daemon.
 
-`VERSION` is the shared default for local, PR, and release builds. Update it deliberately when validating a new upstream release. PR and release workflows run `make test` before packaging. Source builds must use a matching upstream checkout.
+`VERSION` is the shared upstream default for local, PR, and release builds. Update it together with `SHA256SUMS` when validating a new upstream release. PR and release workflows run `make test` before packaging. Source builds must use a matching upstream checkout. Packaging checks the recorded binary version and architecture; rerun `make download` or `make build` when switching either.
 
 A future package with host networking privileges would address transparent outbound access and other kernel networking needs. It is not a prerequisite for inbound service access. Synology documents its [root-package signing restriction](https://help.synology.com/developer-guide/getting_started/system_requirement.html) and [package privilege configuration](https://help.synology.com/developer-guide/privilege/privilege_config.html); any privileged variant needs separate DSM validation. The optional Task Scheduler path remains available for administrator-managed TUN operation.
+
+## Releasing
+
+The release flow follows [netbirdio/netbird-unraid](https://github.com/netbirdio/netbird-unraid): merging changes maintains a draft, and publishing that draft ships the package.
+
+1. Merge changes into `main`. **Draft release** refreshes one draft with a categorized changelog and an automatic tag such as `v0.80.0-5`. PR titles starting with `feat:`, `fix:`, `chore:`, `refactor:`, `docs:`, `build:`, or `ci:` are categorized directly. Other titles still appear in the changelog.
+2. Review the draft under **Releases** and publish it. Keep its generated tag and `main` target. **Build SPK Release** checks out that exact tag, verifies its upstream version and checksums, tests the package scripts, and builds both architectures.
+3. The workflow attaches both SPKs and refreshes the existing per-architecture GitHub Pages catalogs. Catalog versions, download URLs, sizes, and hashes come from those SPKs.
+
+No version file needs a manual package revision. The next revision is one greater than the highest valid numeric revision in existing Git tags, including tags for older upstream versions. Repeated draft updates keep the same next revision until a release creates its tag. Legacy tags with text or double hyphens do not reserve a revision. This follows [Synology's numeric version requirements](https://help.synology.com/developer-guide/synology_package/INFO_necessary_fields.html).
+
+**Update NetBird** checks daily at 07:00 UTC for a newer stable upstream release. It downloads and verifies the amd64 and arm64 archives, tests the package scripts, and builds both packages before opening or refreshing `automation/netbird-bump` with changes to `VERSION` and `SHA256SUMS`. Review and merge that PR to include the update in the draft. The update check can also be run manually with `latest` or a stable version. It does not publish a release.
+
+The updater uses the existing `GITHUB_TOKEN`; no additional token or secret is needed. GitHub does not trigger PR workflows for PRs created with that token, so the updater runs tests and both builds itself. Its `chore:` title puts the update in the draft's Maintenance section without needing a label workflow.
+
+If a release fails partway through, rerun it or dispatch **Build SPK Release** with its published tag. Existing release assets are reused without replacing them. Only the highest stable package version can update the catalogs, so retrying an older release or building a prerelease does not roll back the package source. Releases made before this automation was added cannot be rebuilt through the new workflow.
+
+Local and PR packages use revision `0` so a later release can upgrade them. To test one over an installed release, back up enrollment and uninstall the installed package first. Older PR builds used large revisions; those also need uninstalling before switching to revision `0` or a normal release at the same upstream version.
+
+### One-time repository setup
+
+- Set **Settings → Pages → Build and deployment → Source** to **GitHub Actions**, and let the `github-pages` environment deploy release tags. An environment restricted to `main` will block this workflow's tagged deployments.
+- Enable **Settings → Actions → General → Allow GitHub Actions to create and approve pull requests** so the updater can open its PR. The workflow requests only the permissions it needs; the repository's default token permissions can stay read-only. If organization policy blocks this setting, the updater can validate an update but cannot open the PR.
+- Run **Draft release** manually after the first merge to seed the draft, or let the merge's push create it. Keep publishing manual so only reviewed changes reach the package source.
 
 ## Testing & Validation
 

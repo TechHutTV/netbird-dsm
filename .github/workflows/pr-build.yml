@@ -6,9 +6,11 @@ on:
     paths:
       - 'Makefile'
       - 'VERSION'
+      - 'SHA256SUMS'
       - 'spk/**'
+      - 'scripts/**'
       - 'tests/**'
-      - '.github/workflows/pr-build.yml'
+      - '.github/**'
 
 permissions:
   contents: read
@@ -35,15 +37,7 @@ jobs:
       - name: Resolve versions
         id: ver
         run: |
-          set -euo pipefail
-          upstream=$(cat VERSION)
-          # PR-build revision: 9000<PR_NUMBER> (e.g. PR #5 -> 90005).
-          # Valid integer revision per DSM's INFO spec, well above the
-          # small-integer range used for release suffixes (-1, -2, ...).
-          pkg="${upstream}-9000${{ github.event.number }}"
-          echo "upstream=$upstream" >> "$GITHUB_OUTPUT"
-          echo "pkg=$pkg" >> "$GITHUB_OUTPUT"
-          echo "Building $pkg (NetBird v$upstream)"
+          python3 -B scripts/version.py pr >> "$GITHUB_OUTPUT"
 
   build:
     needs: setup
@@ -62,18 +56,10 @@ jobs:
           persist-credentials: false
 
       - name: Download NetBird binary (upstream)
-        run: |
-          make download \
-            VERSION=${{ needs.setup.outputs.upstream }} \
-            SYNOLOGY_ARCH=${{ matrix.synology_arch }} \
-            NETBIRD_ARCH=${{ matrix.netbird_arch }}
-
-      - name: Build SPK (PR version)
-        run: |
-          make package \
-            VERSION=${{ needs.setup.outputs.pkg }} \
-            SYNOLOGY_ARCH=${{ matrix.synology_arch }} \
-            NETBIRD_ARCH=${{ matrix.netbird_arch }}
+        env:
+          PACKAGE_VERSION: ${{ needs.setup.outputs.pkg }}
+          SYNOLOGY_ARCH: ${{ matrix.synology_arch }}
+        run: make download package
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
@@ -85,6 +71,7 @@ jobs:
 
   comment:
     needs: [setup, build]
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -102,6 +89,6 @@ jobs:
             - `netbird_${{ needs.setup.outputs.pkg }}_synology_amd64` — x86_64 (DS918+, DS920+, DS1821+, etc.)
             - `netbird_${{ needs.setup.outputs.pkg }}_synology_arm64` — aarch64 (DS220j, DS418j, etc.)
 
-            Install via **Package Center → Manual Install**. PR builds use revision `9000${{ github.event.number }}` to keep them distinct from release versions; uninstall any prior PR build before installing a new one.
+            Install via **Package Center → Manual Install**. Revision `0` is reserved for development so the next release can upgrade it. Uninstall a previously installed release (including older PR builds with high revisions) before testing this build; back up enrollment first. Install the next release to return to the normal update channel.
 
             _Artifacts expire 14 days after the run._
