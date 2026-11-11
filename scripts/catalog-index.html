@@ -237,10 +237,12 @@
       const input = document.getElementById(button.dataset.copySource);
       const feedback = document.getElementById(input.id + '-feedback');
       const label = button.querySelector('span');
+      let copying = false;
       input.addEventListener('click', () => input.select());
       button.addEventListener('click', async () => {
+        if (copying) return;
+        copying = true;
         clearTimeout(copyTimers.get(button));
-        button.disabled = true;
         button.dataset.copied = 'false';
         label.textContent = 'Copy URL';
         try {
@@ -257,7 +259,7 @@
           input.select();
           feedback.textContent = 'URL selected. Press Ctrl+C (⌘C on Mac) to copy.';
         } finally {
-          button.disabled = false;
+          copying = false;
         }
       });
     });
