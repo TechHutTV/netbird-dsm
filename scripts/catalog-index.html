@@ -1,77 +1,268 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<title>NetBird DSM Package Source</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-  body { font-family: -apple-system, system-ui, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.55; color: #1f2328; }
-  h1 { display: flex; align-items: center; gap: 0.75rem; font-size: 1.6rem; }
-  h1 img { width: 48px; height: 48px; }
-  h2 { font-size: 1.05rem; margin-top: 2rem; }
-  h3 { font-size: 0.95rem; margin: 1rem 0 0.4rem; color: #1f2328; }
-  code, pre { background: #f6f8fa; border-radius: 6px; }
-  code { padding: 0.1rem 0.3rem; font-size: 0.9em; }
-  pre { padding: 0.6rem 0.8rem; overflow-x: auto; font-size: 0.85rem; }
-  .url-box input { width: 100%; padding: 0.55rem 0.75rem; font-family: ui-monospace, monospace; font-size: 0.9rem; border: 1px solid #d0d7de; border-radius: 6px; box-sizing: border-box; }
-  ol li { margin: 0.35rem 0; }
-  ul li { margin: 0.2rem 0; }
-  hr { border: 0; border-top: 1px solid #d0d7de; margin: 2rem 0; }
-  footer { font-size: 0.85rem; color: #6e7781; }
-  details { margin-top: 0.75rem; }
-  summary { cursor: pointer; color: #0969da; font-size: 0.9rem; }
-  .notice { background: #fff8c5; border: 1px solid #d4a72c; border-left-width: 4px; border-radius: 6px; padding: 0.75rem 1rem; margin: 1rem 0 1.5rem; font-size: 0.9rem; }
-  .notice strong { display: block; margin-bottom: 0.25rem; }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#181a1d">
+  <meta name="description" content="Install NetBird on Synology DSM. Package downloads and update sources for Intel/AMD and ARM64 NAS devices.">
+  <title>NetBird for Synology DSM</title>
+  <link rel="icon" type="image/svg+xml" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 31 23"><path d="M21.46 0.52c-3.65 0.33-5.46 2.43-6.15 3.49L4.66 22.47h12.86L30.19 0.52H21.46z" fill="%23F68330"/><path d="M17.53 22.47L0 3.89s19.82-5.33 21.75 11.28l-4.22 7.3z" fill="%23F68330"/><path d="M14.92 4.71L9.55 14.02l7.97 8.45 4.22-7.32C21.07 9.45 18.29 6.33 14.92 4.7" fill="%23F05252"/></svg>'>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    :root {
+      color-scheme: dark;
+      /* Match the DSM interface in spk/package/ui/index.cgi. */
+      --bg: #181a1d;
+      --card: #1c1e21;
+      --border: #2e3238;
+      --border-strong: #363b40;
+      --row-border: #25282d;
+      --text: #f3f4f6;
+      --text-dim: #9ca3af;
+      --text-soft: #b7c0c6;
+      --netbird: #f68330;
+      --green: #31c48d;
+      --yellow: #e3a008;
+    }
+    body {
+      margin: 0; min-height: 100vh; padding: 2.5rem 1.5rem 4rem;
+      background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      line-height: 1.6; letter-spacing: 0.01em; -webkit-font-smoothing: antialiased;
+    }
+    main, footer { max-width: 760px; margin: 0 auto; }
+    .brand {
+      display: flex; align-items: center; gap: 0.625rem; margin-bottom: 1.75rem;
+      color: var(--text-dim); font-size: 0.8125rem; font-weight: 500;
+      text-transform: uppercase; letter-spacing: 0.08em;
+    }
+    .brand svg { height: 18px; width: auto; }
+    h1 { margin: 0; font-size: 1.625rem; font-weight: 600; letter-spacing: -0.015em; line-height: 1.3; }
+    h2 { margin: 0; font-size: 1rem; font-weight: 600; }
+    h3 { margin: 0; font-size: 0.9375rem; font-weight: 500; }
+    p { margin: 0.625rem 0 0; }
+    a { color: var(--netbird); text-underline-offset: 0.2em; }
+    a:hover { color: #ffae73; }
+    :where(a, button, input, summary):focus-visible { outline: 2px solid var(--netbird); outline-offset: 3px; }
+    .intro { max-width: 620px; color: var(--text-dim); font-size: 0.9375rem; }
+    .card { margin-top: 1.5rem; background: var(--card); border: 1px solid var(--border); border-radius: 8px; }
+    .section-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem 1rem; padding: 1rem; }
+    .version { font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace; font-size: 0.8125rem; text-decoration: none; }
+    .list { list-style: none; padding: 0; margin: 0; }
+    .list li {
+      display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap;
+      gap: 0.375rem 1rem; padding: 0.875rem 1rem; border-top: 1px solid var(--row-border);
+      font-size: 0.84rem; min-height: 48px;
+    }
+    .label { color: var(--text-soft); }
+    .value { color: var(--text-dim); font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace; }
+    .actions { display: flex; flex-wrap: wrap; gap: 0.625rem; padding: 1rem; border-top: 1px solid var(--row-border); }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+      min-height: 44px; padding: 0.5rem 0.875rem; border-radius: 6px;
+      border: 1px solid var(--border-strong); background: var(--card); color: var(--text-soft);
+      font-family: inherit; font-size: 0.84rem; font-weight: 500; line-height: 1.4;
+      text-decoration: none; cursor: pointer;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .btn:hover { background: var(--row-border); color: var(--text); }
+    .btn:disabled { opacity: 0.6; cursor: default; }
+    .btn-primary { background: var(--netbird); border-color: var(--netbird); color: var(--bg); }
+    .btn-primary:hover { background: #ff9a50; border-color: #ff9a50; color: var(--bg); }
+    .icon { width: 16px; height: 16px; flex-shrink: 0; }
+    .notice { margin-top: 1rem; padding: 0.875rem 1rem; border: 1px solid var(--yellow); border-radius: 8px; color: var(--text-soft); font-size: 0.8125rem; }
+    .notice strong { color: var(--yellow); }
+    .section-copy { padding: 0 1rem 1rem; margin: 0; color: var(--text-dim); font-size: 0.875rem; }
+    .source { padding: 1rem; border-top: 1px solid var(--row-border); }
+    .source-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 0.375rem 1rem; }
+    .source-heading label { cursor: text; }
+    .source p { margin: 0.375rem 0 0.875rem; color: var(--text-dim); font-size: 0.8125rem; }
+    .source-url { display: flex; align-items: stretch; gap: 0.625rem; }
+    .source-url input {
+      flex: 1; min-width: 0; width: 100%; padding: 0.625rem 0.75rem;
+      border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg); color: var(--text);
+      font: 0.8125rem/1.5 ui-monospace, 'SFMono-Regular', Consolas, monospace;
+    }
+    .source-url .btn { flex-shrink: 0; }
+    .copy-feedback { display: block; min-height: 1.5em; margin: 0.5rem 0 0; color: var(--text-soft); font-size: 0.75rem; }
+    .btn-copy[data-copied="true"] { color: var(--green); }
+    .icon-check, .btn-copy[data-copied="true"] .icon-copy { display: none; }
+    .btn-copy[data-copied="true"] .icon-check { display: block; }
+    .architecture { border-top: 1px solid var(--row-border); }
+    summary {
+      display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+      min-height: 48px; padding: 0.875rem 1rem; color: var(--text-soft);
+      font-size: 0.84rem; list-style: none; cursor: pointer; border-radius: 8px;
+    }
+    summary::-webkit-details-marker { display: none; }
+    summary:hover { color: var(--text); background: var(--row-border); }
+    .chevron { flex-shrink: 0; transition: transform 0.15s; }
+    details[open] > summary .chevron { transform: rotate(180deg); }
+    .details-body { padding: 0 1rem 1rem; color: var(--text-dim); font-size: 0.8125rem; }
+    .details-body p { margin-top: 0.75rem; }
+    code, pre { font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace; }
+    code { padding: 0.125rem 0.4rem; border-radius: 4px; background: var(--row-border); color: var(--netbird); font-size: 0.8125rem; overflow-wrap: anywhere; }
+    pre { margin: 0.75rem 0; padding: 0.75rem; border: 1px solid var(--border); border-radius: 6px; background: #16181b; white-space: pre-wrap; overflow-wrap: anywhere; }
+    pre code { padding: 0; background: none; color: var(--text-soft); font-size: inherit; }
+    .steps { margin: 0; padding: 0 1.25rem 1rem 2.5rem; color: var(--text-soft); font-size: 0.875rem; }
+    .steps li { padding-left: 0.25rem; margin: 0.5rem 0; }
+    .steps li::marker { color: var(--text-dim); }
+    .steps strong { color: var(--text); font-weight: 500; }
+    .details-body ol { margin: 0.75rem 0 0; padding-left: 1.25rem; }
+    .details-body li + li { margin-top: 0.5rem; }
+    footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.5rem 1.25rem; padding-top: 1.5rem; color: var(--text-dim); font-size: 0.75rem; }
+    footer a { color: var(--text-dim); }
+    footer nav { display: flex; flex-wrap: wrap; gap: 1.25rem; }
+    @media (max-width: 540px) {
+      body { padding: 1.5rem 1rem 3rem; }
+      h1 { font-size: 1.375rem; }
+      .brand { margin-bottom: 1.25rem; }
+      .source-url { flex-direction: column; }
+      .source-url input { font-size: 1rem; }
+      .source-url .btn { align-self: flex-start; }
+      .actions .btn { flex: 1; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition: none !important; }
+    }
+  </style>
 </head>
 <body>
-<h1><img src="icon-256.png" alt="">NetBird DSM Package Source</h1>
-<div class="notice">
-  <strong>&#9888;&#65039; Testing / beta fork</strong>
-  This site hosts a <strong>testing fork</strong> of the NetBird DSM package, used to validate the build, packaging, and update-delivery pipeline before any of it lands in an official NetBird-maintained channel. The Package Source URLs below point at this fork's GitHub Pages deployment. See <a href="https://github.com/$REPO#testing--validation">Testing &amp; Validation</a> in the repository README for what's been verified, what hasn't, and how to report issues.
-</div>
-<p>Synology DSM 7.0+ package source for the <a href="https://netbird.io">NetBird</a> client. Add the URL matching your NAS architecture in <strong>Package Center &rarr; Settings &rarr; Package Sources</strong> to receive automatic updates.</p>
+  <main>
+    <div class="brand">
+      <svg viewBox="0 0 31 23" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M21.4631 0.523438C17.8173 0.857913 16.0028 2.95675 15.3171 4.01871L4.66406 22.4734H17.5163L30.1929 0.523438H21.4631Z" fill="#F68330"/>
+        <path d="M17.5265 22.4737L0 3.88525C0 3.88525 19.8177 -1.44128 21.7493 15.1738L17.5265 22.4737Z" fill="#F68330"/>
+        <path d="M14.9236 4.70563L9.54688 14.0208L17.5158 22.4747L21.7385 15.158C21.0696 9.44682 18.2851 6.32784 14.9236 4.69727" fill="#F05252"/>
+      </svg>
+      NetBird
+    </div>
 
-<h2>Package Source URLs</h2>
+    <header>
+      <h1>NetBird for Synology DSM</h1>
+      <p class="intro">Connect your NAS to NetBird. Install through Package Center and receive updates using the source for your architecture.</p>
+    </header>
 
-<h3>x86_64 (Intel / AMD)</h3>
-<p>Models with Intel Celeron, Xeon, or AMD Ryzen CPUs &mdash; e.g. DS918+, DS920+, DS923+, DS1522+, RS series.</p>
-<div class="url-box"><input type="text" value="$x86_url" readonly onclick="this.select()"></div>
+    <section class="card" aria-labelledby="release-title">
+      <div class="section-heading">
+        <h2 id="release-title">Latest release</h2>
+        <a class="version" href="https://github.com/$REPO/releases/tag/v$PKG_VERSION">v$PKG_VERSION</a>
+      </div>
+      <ul class="list">
+        <li><span class="label">NetBird client</span><a class="value" href="https://github.com/netbirdio/netbird/releases/tag/v$UPSTREAM_VERSION">v$UPSTREAM_VERSION</a></li>
+        <li><span class="label">Synology DSM</span><span class="value">7.0 or later</span></li>
+      </ul>
+      <div class="actions">
+        <a class="btn btn-primary" href="https://github.com/$REPO/releases/tag/v$PKG_VERSION">Download packages</a>
+        <a class="btn" href="https://github.com/$REPO#installation">Open docs</a>
+      </div>
+    </section>
 
-<h3>aarch64 (64-bit ARM)</h3>
-<p>Models with Realtek RTD or Marvell Armada ARM CPUs &mdash; e.g. DS220j, DS223j, DS124, DS418j.</p>
-<div class="url-box"><input type="text" value="$arm_url" readonly onclick="this.select()"></div>
+    <aside class="notice"><strong>Community beta.</strong> This is a community-maintained package, not an official NetBird distribution. See <a href="https://github.com/$REPO#testing--validation">compatibility and testing</a> before installing.</aside>
 
-<details>
-<summary>Not sure which architecture? Run this on your NAS via SSH</summary>
-<pre>synogetkeyvalue /etc.defaults/synoinfo.conf unique</pre>
-<p>Output looks like <code>synology_&lt;arch&gt;_&lt;model&gt;</code>. The middle token tells you which URL to use:</p>
-<ul>
-  <li><strong>x86_64 URL</strong> if you see <code>apollolake</code>, <code>geminilake</code>, <code>v1000</code>, <code>r1000</code>, <code>denverton</code>, <code>broadwell*</code>, <code>purley</code>, <code>epyc7002</code>, etc.</li>
-  <li><strong>aarch64 URL</strong> if you see <code>armada37xx</code>, <code>rtd1296</code>, <code>rtd1619b</code>.</li>
-</ul>
-</details>
+    <section class="card" aria-labelledby="sources-title">
+      <div class="section-heading"><h2 id="sources-title">Package sources</h2></div>
+      <p class="section-copy">Copy the URL for your NAS, then add it in Package Center.</p>
 
-<h2>Setup</h2>
-<ol>
-  <li>Open <strong>Package Center</strong> on your Synology DSM.</li>
-  <li>Open <strong>Settings &rarr; Package Sources</strong>, click <strong>Add</strong>, give it any name, and paste the URL for your arch as the Location.</li>
-  <li>Open <strong>Settings &rarr; General</strong> and set <strong>Trust Level</strong> to <strong>Any publisher</strong>.</li>
-  <li>NetBird will appear under the <strong>Community</strong> tab in Package Center.</li>
-</ol>
+      <div class="source">
+        <div class="source-heading"><h3><label for="source-x86">Intel / AMD</label></h3><span class="value">x86_64</span></div>
+        <p id="source-x86-description">64-bit Intel or AMD models, including DS920+, DS923+, and DS1522+.</p>
+        <div class="source-url">
+          <input id="source-x86" type="url" value="$x86_url" readonly aria-describedby="source-x86-description" spellcheck="false">
+          <button class="btn btn-copy" type="button" data-copy-source="source-x86" aria-label="Copy Intel and AMD package source URL">
+            <svg class="icon icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4"/></svg>
+            <svg class="icon icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
+            <span>Copy URL</span>
+          </button>
+        </div>
+        <output class="copy-feedback" id="source-x86-feedback" role="status"></output>
+      </div>
 
-<h2>Uninstall</h2>
-<p>Stop the package before uninstalling &mdash; DSM can leave the package in a stuck state if the daemon is still running (or has crashed) at the time of removal.</p>
-<ol>
-  <li>In <strong>Package Center</strong>, open <strong>NetBird &rarr; Action &rarr; Stop</strong> (or run <code>sudo synopkg stop netbird</code> via SSH).</li>
-  <li>Then click <strong>Action &rarr; Uninstall</strong>.</li>
-</ol>
+      <div class="source">
+        <div class="source-heading"><h3><label for="source-arm">ARM64</label></h3><span class="value">aarch64</span></div>
+        <p id="source-arm-description">64-bit ARM models, including DS220j, DS223j, and DS124.</p>
+        <div class="source-url">
+          <input id="source-arm" type="url" value="$arm_url" readonly aria-describedby="source-arm-description" spellcheck="false">
+          <button class="btn btn-copy" type="button" data-copy-source="source-arm" aria-label="Copy ARM64 package source URL">
+            <svg class="icon icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4"/></svg>
+            <svg class="icon icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
+            <span>Copy URL</span>
+          </button>
+        </div>
+        <output class="copy-feedback" id="source-arm-feedback" role="status"></output>
+      </div>
 
-<h2>Latest Version</h2>
-<p><strong>v$PKG_VERSION</strong> &mdash; built from <a href="https://github.com/netbirdio/netbird/releases/tag/v$UPSTREAM_VERSION">netbird v$UPSTREAM_VERSION</a>.<br>
-<a href="https://github.com/$REPO/releases">All releases</a></p>
+      <details class="architecture">
+        <summary>Not sure which architecture?<svg class="icon chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+        <div class="details-body">
+          <p>Run this command on your NAS over SSH:</p>
+          <pre><code>synogetkeyvalue /etc.defaults/synoinfo.conf unique</code></pre>
+          <p>The output is <code>synology_&lt;chip&gt;_&lt;model&gt;</code>. Chips such as <code>apollolake</code>, <code>geminilake</code>, <code>v1000</code>, <code>r1000</code>, and <code>denverton</code> use the Intel / AMD source. Chips such as <code>armada37xx</code>, <code>rtd1296</code>, and <code>rtd1619b</code> use ARM64. See the <a href="https://github.com/$REPO/blob/main/spk/INFO.sh">full architecture lists</a> for other supported chips.</p>
+        </div>
+      </details>
+    </section>
 
-<hr>
-<footer>Source: <a href="https://github.com/$REPO">github.com/$REPO</a></footer>
+    <section class="card" aria-labelledby="install-title">
+      <div class="section-heading"><h2 id="install-title">Install in Package Center</h2></div>
+      <ol class="steps">
+        <li>Open <strong>Package Center → Settings → General</strong> and select <strong>Any publisher</strong> under Trust Level.</li>
+        <li>Open <strong>Package Sources</strong>, select <strong>Add</strong>, and paste the URL for your architecture.</li>
+        <li>Find <strong>NetBird</strong> in the <strong>Community</strong> tab and install it.</li>
+        <li>Open NetBird from DSM's main menu to enroll and connect your NAS.</li>
+      </ol>
+      <p class="section-copy">Installing an SPK directly? Follow the <a href="https://github.com/$REPO#manual-installation">manual installation steps</a>.</p>
+    </section>
+
+    <details class="card">
+      <summary>Uninstall the package<svg class="icon chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+      <div class="details-body">
+        <p>Stop NetBird before uninstalling to avoid leaving the package in a stuck state.</p>
+        <ol>
+          <li>In Package Center, open <strong>NetBird → Action → Stop</strong>, or run <code>sudo synopkg stop netbird</code> over SSH.</li>
+          <li>Select <strong>Action → Uninstall</strong>.</li>
+        </ol>
+        <p>Back up package state before uninstalling if you need to retain enrollment.</p>
+      </div>
+    </details>
+  </main>
+
+  <footer>
+    <span>NetBird for Synology DSM</span>
+    <nav aria-label="Project links"><a href="https://github.com/$REPO">Source code</a><a href="https://github.com/$REPO/releases">All releases</a><a href="https://github.com/$REPO/issues">Report an issue</a></nav>
+  </footer>
+
+  <script>
+    const copyTimers = new WeakMap();
+    document.querySelectorAll('[data-copy-source]').forEach(button => {
+      const input = document.getElementById(button.dataset.copySource);
+      const feedback = document.getElementById(input.id + '-feedback');
+      const label = button.querySelector('span');
+      let copying = false;
+      input.addEventListener('click', () => input.select());
+      button.addEventListener('click', async () => {
+        if (copying) return;
+        copying = true;
+        clearTimeout(copyTimers.get(button));
+        button.dataset.copied = 'false';
+        label.textContent = 'Copy URL';
+        try {
+          await navigator.clipboard.writeText(input.value);
+          button.dataset.copied = 'true';
+          label.textContent = 'Copied';
+          feedback.textContent = input.labels[0].textContent + ' package source URL copied.';
+          copyTimers.set(button, setTimeout(() => {
+            button.dataset.copied = 'false';
+            label.textContent = 'Copy URL';
+          }, 2500));
+        } catch {
+          input.focus();
+          input.select();
+          feedback.textContent = 'URL selected. Press Ctrl+C (⌘C on Mac) to copy.';
+        } finally {
+          copying = false;
+        }
+      });
+    });
+  </script>
 </body>
 </html>
