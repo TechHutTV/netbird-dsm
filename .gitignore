@@ -6,6 +6,8 @@ spk/INFO
 spk/package.tgz
 build/
 dist/
+_site/
+__pycache__/
 
 # Local UI preview (not part of the package)
 preview.html

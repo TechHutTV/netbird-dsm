@@ -1,0 +1,33 @@
+categories:
+  - title: New Features
+    when:
+      - conventional:
+          type: feat
+      - labels: [feat, enhancement]
+  - title: Bug Fixes
+    when:
+      - conventional:
+          type: fix
+      - labels: [fix, bug]
+  - title: Maintenance
+    when:
+      - conventional:
+          types: [chore, refactor, build, ci, test, perf]
+      - labels: [chore, refactor, build, ci]
+  - title: Documentation
+    when:
+      - conventional:
+          type: docs
+      - labels: [docs, documentation]
+
+change-template: '- $TITLE (#$NUMBER)'
+change-title-escapes: '\<*_&'
+template: |
+  ## Changes
+
+  $CHANGES
+
+replacers:
+  - search: '/^(feat|fix|chore|refactor|docs|build|ci|test|perf)(\([^)]*\))?!?:\s*/'
+    replace: ''
+

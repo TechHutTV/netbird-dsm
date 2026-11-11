@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>NetBird DSM Package Source</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: -apple-system, system-ui, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.55; color: #1f2328; }
+  h1 { display: flex; align-items: center; gap: 0.75rem; font-size: 1.6rem; }
+  h1 img { width: 48px; height: 48px; }
+  h2 { font-size: 1.05rem; margin-top: 2rem; }
+  h3 { font-size: 0.95rem; margin: 1rem 0 0.4rem; color: #1f2328; }
+  code, pre { background: #f6f8fa; border-radius: 6px; }
+  code { padding: 0.1rem 0.3rem; font-size: 0.9em; }
+  pre { padding: 0.6rem 0.8rem; overflow-x: auto; font-size: 0.85rem; }
+  .url-box input { width: 100%; padding: 0.55rem 0.75rem; font-family: ui-monospace, monospace; font-size: 0.9rem; border: 1px solid #d0d7de; border-radius: 6px; box-sizing: border-box; }
+  ol li { margin: 0.35rem 0; }
+  ul li { margin: 0.2rem 0; }
+  hr { border: 0; border-top: 1px solid #d0d7de; margin: 2rem 0; }
+  footer { font-size: 0.85rem; color: #6e7781; }
+  details { margin-top: 0.75rem; }
+  summary { cursor: pointer; color: #0969da; font-size: 0.9rem; }
+  .notice { background: #fff8c5; border: 1px solid #d4a72c; border-left-width: 4px; border-radius: 6px; padding: 0.75rem 1rem; margin: 1rem 0 1.5rem; font-size: 0.9rem; }
+  .notice strong { display: block; margin-bottom: 0.25rem; }
+</style>
+</head>
+<body>
+<h1><img src="icon-256.png" alt="">NetBird DSM Package Source</h1>
+<div class="notice">
+  <strong>&#9888;&#65039; Testing / beta fork</strong>
+  This site hosts a <strong>testing fork</strong> of the NetBird DSM package, used to validate the build, packaging, and update-delivery pipeline before any of it lands in an official NetBird-maintained channel. The Package Source URLs below point at this fork's GitHub Pages deployment. See <a href="https://github.com/$REPO#testing--validation">Testing &amp; Validation</a> in the repository README for what's been verified, what hasn't, and how to report issues.
+</div>
+<p>Synology DSM 7.0+ package source for the <a href="https://netbird.io">NetBird</a> client. Add the URL matching your NAS architecture in <strong>Package Center &rarr; Settings &rarr; Package Sources</strong> to receive automatic updates.</p>
+
+<h2>Package Source URLs</h2>
+
+<h3>x86_64 (Intel / AMD)</h3>
+<p>Models with Intel Celeron, Xeon, or AMD Ryzen CPUs &mdash; e.g. DS918+, DS920+, DS923+, DS1522+, RS series.</p>
+<div class="url-box"><input type="text" value="$x86_url" readonly onclick="this.select()"></div>
+
+<h3>aarch64 (64-bit ARM)</h3>
+<p>Models with Realtek RTD or Marvell Armada ARM CPUs &mdash; e.g. DS220j, DS223j, DS124, DS418j.</p>
+<div class="url-box"><input type="text" value="$arm_url" readonly onclick="this.select()"></div>
+
+<details>
+<summary>Not sure which architecture? Run this on your NAS via SSH</summary>
+<pre>synogetkeyvalue /etc.defaults/synoinfo.conf unique</pre>
+<p>Output looks like <code>synology_&lt;arch&gt;_&lt;model&gt;</code>. The middle token tells you which URL to use:</p>
+<ul>
+  <li><strong>x86_64 URL</strong> if you see <code>apollolake</code>, <code>geminilake</code>, <code>v1000</code>, <code>r1000</code>, <code>denverton</code>, <code>broadwell*</code>, <code>purley</code>, <code>epyc7002</code>, etc.</li>
+  <li><strong>aarch64 URL</strong> if you see <code>armada37xx</code>, <code>rtd1296</code>, <code>rtd1619b</code>.</li>
+</ul>
+</details>
+
+<h2>Setup</h2>
+<ol>
+  <li>Open <strong>Package Center</strong> on your Synology DSM.</li>
+  <li>Open <strong>Settings &rarr; Package Sources</strong>, click <strong>Add</strong>, give it any name, and paste the URL for your arch as the Location.</li>
+  <li>Open <strong>Settings &rarr; General</strong> and set <strong>Trust Level</strong> to <strong>Any publisher</strong>.</li>
+  <li>NetBird will appear under the <strong>Community</strong> tab in Package Center.</li>
+</ol>
+
+<h2>Uninstall</h2>
+<p>Stop the package before uninstalling &mdash; DSM can leave the package in a stuck state if the daemon is still running (or has crashed) at the time of removal.</p>
+<ol>
+  <li>In <strong>Package Center</strong>, open <strong>NetBird &rarr; Action &rarr; Stop</strong> (or run <code>sudo synopkg stop netbird</code> via SSH).</li>
+  <li>Then click <strong>Action &rarr; Uninstall</strong>.</li>
+</ol>
+
+<h2>Latest Version</h2>
+<p><strong>v$PKG_VERSION</strong> &mdash; built from <a href="https://github.com/netbirdio/netbird/releases/tag/v$UPSTREAM_VERSION">netbird v$UPSTREAM_VERSION</a>.<br>
+<a href="https://github.com/$REPO/releases">All releases</a></p>
+
+<hr>
+<footer>Source: <a href="https://github.com/$REPO">github.com/$REPO</a></footer>
+</body>
+</html>

@@ -1,0 +1,52 @@
+name: Draft release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    concurrency:
+      group: draft-release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve next package revision
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" | jq 'add' > "$RUNNER_TEMP/releases.json"
+          python3 -B scripts/version.py next --releases-file "$RUNNER_TEMP/releases.json" >> "$GITHUB_OUTPUT"
+
+      - uses: release-drafter/release-drafter@v7.10.0
+        with:
+          config-name: release-drafter.yml
+          name: NetBird DSM ${{ steps.version.outputs.pkg }}
+          tag: ${{ steps.version.outputs.tag }}
+          version: ${{ steps.version.outputs.pkg }}
+          # DSM revisions sort as SemVer prereleases. Select the previous
+          # published package explicitly so old bare tags cannot win the sort.
+          from: ${{ steps.version.outputs.previous_tag }}
+          commitish: main
+          prerelease: false
+          latest: true
+          header: |
+            Built from [NetBird v${{ steps.version.outputs.upstream }}](https://github.com/netbirdio/netbird/releases/tag/v${{ steps.version.outputs.upstream }}).
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+

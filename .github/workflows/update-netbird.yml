@@ -1,0 +1,67 @@
+name: Update NetBird
+
+on:
+  schedule:
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+    inputs:
+      netbird_version:
+        description: 'Stable NetBird version to pin (X.Y.Z or latest)'
+        required: false
+        default: latest
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: update-netbird
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Verify upstream archives and update pins
+        id: upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_VERSION: ${{ inputs.netbird_version || 'latest' }}
+        run: python3 -B scripts/update-netbird.py --version "$REQUESTED_VERSION" --output "$GITHUB_OUTPUT"
+
+      - name: Test package scripts
+        if: steps.upstream.outputs.changed == 'true'
+        run: make test
+
+      # GITHUB_TOKEN-created PRs do not trigger pull_request workflows, so run
+      # the same package builds here before opening or updating the PR.
+      - name: Build and validate both architectures
+        if: steps.upstream.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          make download package SYNOLOGY_ARCH=x86_64
+          make download package SYNOLOGY_ARCH=aarch64
+          python3 -B scripts/build-catalog.py --version "$(cat VERSION)-0" --repo "$GITHUB_REPOSITORY" --base-url https://example.invalid --output "$RUNNER_TEMP/catalog-check"
+
+      - name: Open or update the upstream PR
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ github.token }}
+          branch: automation/netbird-bump
+          delete-branch: true
+          add-paths: |
+            VERSION
+            SHA256SUMS
+          commit-message: 'chore: update NetBird to ${{ steps.upstream.outputs.version }}'
+          title: 'chore: update NetBird to ${{ steps.upstream.outputs.version }}'
+          body: |
+            Update the pinned upstream client to [NetBird v${{ steps.upstream.outputs.version }}](https://github.com/netbirdio/netbird/releases/tag/v${{ steps.upstream.outputs.version }}).
+
+            Both Linux archives (amd64 and arm64) were downloaded and verified against their upstream SHA256 digests. VERSION and SHA256SUMS are updated together.
+
+            Merging refreshes the release draft. Publish that draft when ready to ship.
