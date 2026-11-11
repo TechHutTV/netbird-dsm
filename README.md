@@ -492,6 +492,8 @@ The release flow follows [netbirdio/netbird-unraid](https://github.com/netbirdio
 
 No version file needs a manual package revision. The next revision is one greater than the highest valid numeric revision in existing Git tags, including tags for older upstream versions. Repeated draft updates keep the same next revision until a release creates its tag. Legacy tags with text or double hyphens do not reserve a revision. This follows [Synology's numeric version requirements](https://help.synology.com/developer-guide/synology_package/INFO_necessary_fields.html).
 
+Release titles show the upstream version, such as **NetBird DSM 0.82.1**. The tag, SPK, and update catalog keep the numeric package revision, such as `v0.82.1-6`.
+
 **Update NetBird** checks daily at 07:00 UTC for a newer stable upstream release. It downloads and verifies the amd64 and arm64 archives, tests the package scripts, and builds both packages before opening or refreshing `automation/netbird-bump` with changes to `VERSION` and `SHA256SUMS`. Review and merge that PR to include the update in the draft. The update check can also be run manually with `latest` or a stable version. It does not publish a release.
 
 The updater uses the existing `GITHUB_TOKEN`; no additional token or secret is needed. GitHub does not trigger PR workflows for PRs created with that token, so the updater runs tests and both builds itself. Its `chore:` title puts the update in the draft's Maintenance section without needing a label workflow.

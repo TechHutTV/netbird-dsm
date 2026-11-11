@@ -22,12 +22,11 @@ categories:
 
 change-template: '- $TITLE (#$NUMBER)'
 change-title-escapes: '\<*_&'
-template: |
-  ## Changes
-
-  $CHANGES
+# Action inputs trim the header's trailing newline; keep spacing in the template.
+template: "\n\n$CHANGES\n"
 
 replacers:
-  - search: '/^(feat|fix|chore|refactor|docs|build|ci|test|perf)(\([^)]*\))?!?:\s*/'
+  - target: change-title
+    search: '/^(feat|fix|chore|refactor|docs|build|ci|test|perf)(\([^)]*\))?!?:\s*/'
     replace: ''
 
