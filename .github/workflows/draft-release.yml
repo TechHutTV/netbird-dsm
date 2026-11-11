@@ -36,7 +36,7 @@ jobs:
       - uses: release-drafter/release-drafter@v7.10.0
         with:
           config-name: release-drafter.yml
-          name: NetBird DSM ${{ steps.version.outputs.pkg }}
+          name: NetBird DSM ${{ steps.version.outputs.upstream }}
           tag: ${{ steps.version.outputs.tag }}
           version: ${{ steps.version.outputs.pkg }}
           # DSM revisions sort as SemVer prereleases. Select the previous
